@@ -15,6 +15,7 @@
 
 #include "ws_connection.h"
 #include <IXNetSystem.h>
+#include <IXSocketTLSOptions.h>
 #include <cstdio>
 #include <cstdarg>
 
@@ -215,6 +216,14 @@ bool Connection::connect(const char* hostname, bool secure,
     ws_.setUrl(url);
     // Auto-reconnect is configured by enableAutoReconnect() before connect [OPM-128]
     ws_.disablePerMessageDeflate();
+
+    // Explicit TLS: use system CA store, verify hostname [OPM-156]
+    if (secure) {
+        ix::SocketTLSOptions tlsOpts;
+        tlsOpts.caFile = "SYSTEM";
+        tlsOpts.disable_hostname_validation = false;
+        ws_.setTLSOptions(tlsOpts);
+    }
 
     // Set callback (captures 'this')
     ws_.setOnMessageCallback([this](const ix::WebSocketMessagePtr& msg) {

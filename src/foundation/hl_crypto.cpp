@@ -10,6 +10,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <windows.h>  // SecureZeroMemory (cannot be optimized away)
 
 // secp256k1 library (bundled header-only version)
 // Enable recovery module for Ethereum-style signatures
@@ -137,7 +138,7 @@ bool deriveAddress(const char* privateKeyHex, char* addressOut, size_t addressOu
     }
 
     // Clear sensitive data
-    memset(privkey, 0, sizeof(privkey));
+    SecureZeroMemory(privkey, sizeof(privkey));
 
     return true;
 }
@@ -169,14 +170,14 @@ bool signHash(const uint8_t* hash, const char* privateKeyHex, Signature& sigOut)
 
     // Verify private key
     if (!secp256k1_ec_seckey_verify(s_ctx, privkey)) {
-        memset(privkey, 0, sizeof(privkey));
+        SecureZeroMemory(privkey, sizeof(privkey));
         return false;
     }
 
     // Sign with recoverable signature
     secp256k1_ecdsa_recoverable_signature sig;
     if (!secp256k1_ecdsa_sign_recoverable(s_ctx, &sig, hash, privkey, nullptr, nullptr)) {
-        memset(privkey, 0, sizeof(privkey));
+        SecureZeroMemory(privkey, sizeof(privkey));
         return false;
     }
 
@@ -201,7 +202,7 @@ bool signHash(const uint8_t* hash, const char* privateKeyHex, Signature& sigOut)
     sigOut.v = recid + 27;
 
     // Clear sensitive data
-    memset(privkey, 0, sizeof(privkey));
+    SecureZeroMemory(privkey, sizeof(privkey));
 
     return true;
 }

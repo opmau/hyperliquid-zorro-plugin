@@ -1,10 +1,10 @@
 @echo off
 REM Compile-only test for hl_meta module (/c = compile only, no linking)
-REM Run from: tests\ directory
+REM Run from: c:\Users\admki\OneDrive\Zorro-plugin\tests\
 
 call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 
-cd /d "%~dp0.."
+cd /d "C:\Users\admki\OneDrive\Zorro-plugin"
 
 echo.
 echo === Compile-only check for hl_meta module (Services Layer) ===
