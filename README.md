@@ -67,17 +67,34 @@ cmake --build . --config Release
 
 Output: `build_vcpkg/Release/Hyperliquid_Dev.dll`
 
+#### Production build
+
+To build as `Hyperliquid.dll` instead of `Hyperliquid_Dev.dll`:
+
+```batch
+cmake .. -DDEV_BUILD=OFF -G "Visual Studio 17 2022" -A Win32 ^
+  -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
+  -DVCPKG_TARGET_TRIPLET=x86-windows-static
+cmake --build . --config Release
+```
+
+Output: `build_vcpkg/Release/Hyperliquid.dll`
+
 ### 4. Deploy
 
 Copy the DLL to your Zorro Plugin directory:
 
 ```batch
+REM Dev build
 copy build_vcpkg\Release\Hyperliquid_Dev.dll "C:\Zorro\Plugin\"
+
+REM Production build
+copy build_vcpkg\Release\Hyperliquid.dll "C:\Zorro\Plugin\"
 ```
 
 ### 5. Configure in Zorro
 
-1. Select **Hyperliquid** as broker
+1. Select **Hyperliquid** (or **Hyperliquid-DEV** for dev builds) as broker
 2. Enter your **wallet address** in the User field
 3. Enter your **private key** in the Password field
 4. Use testnet first: set `TESTNET=1` in accounts.csv or your strategy
