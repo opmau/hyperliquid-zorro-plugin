@@ -2,6 +2,10 @@
 #include "../src/foundation/hl_globals.h"
 #include <cstdio>
 #include <cassert>
+#include <ctime>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 // Mock log callback
 static int testLogCallback(const char* msg) {
@@ -58,8 +62,8 @@ int main() {
     printf("[5] Testing TradingState...\n");
     int id1 = hl::g_trading.generateTradeId();
     int id2 = hl::g_trading.generateTradeId();
-    assert(id1 == 1);
-    assert(id2 == 2);
+    assert(id1 == 2);  // init() sets nextTradeId=2 (Zorro treats 0/1 as failure)
+    assert(id2 == 3);
     printf("    Generated IDs: %d, %d\n", id1, id2);
 
     uint64_t nonce1 = hl::g_trading.generateNonce();
@@ -67,6 +71,27 @@ int main() {
     assert(nonce2 > nonce1);
     printf("    Nonces: %llu, %llu (monotonic: %s)\n",
            nonce1, nonce2, nonce2 > nonce1 ? "yes" : "NO!");
+
+    // Precision test: nonce should reflect actual wall-clock ms, not coarse seconds.
+    // Generate a nonce, sleep 50ms, generate another. The gap should be >= 20ms
+    // (allowing generous tolerance). With old time()*1000 (1-second granularity),
+    // two nonces within the same second would differ by only 1-2, not ~50.
+    printf("[5b] Testing nonce precision (ms-level)...\n");
+    hl::g_trading.lastNonce = 0;  // Reset to avoid stale monotonic bump
+    uint64_t nonceA = hl::g_trading.generateNonce();
+#ifdef _WIN32
+    Sleep(50);
+#else
+    usleep(50000);
+#endif
+    uint64_t nonceB = hl::g_trading.generateNonce();
+    uint64_t gap = nonceB - nonceA;
+    printf("    nonceA=%llu, nonceB=%llu, gap=%llu ms\n", nonceA, nonceB, gap);
+    // With ms precision, gap should be ~50. With second precision, gap would be 1.
+    assert(gap >= 20 && "Nonce precision too coarse — expected ms-level resolution");
+    // Verify nonces are in a plausible epoch range (after 2024-01-01 = 1704067200000)
+    assert(nonceA > 1704067200000ULL && "Nonce should be a Unix epoch ms timestamp");
+    printf("    OK (ms-level precision confirmed)\n\n");
 
     // Test trade map
     hl::OrderState order = {};

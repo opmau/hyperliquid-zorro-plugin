@@ -11,7 +11,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-cd /d "%~dp0.."
+cd /d "C:\Users\admki\OneDrive\Zorro-plugin"
 echo.
 
 echo Compiling ws_price_cache.cpp...
