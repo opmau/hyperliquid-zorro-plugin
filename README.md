@@ -4,10 +4,10 @@ A broker plugin that connects [Zorro](https://zorro-project.com/) algorithmic tr
 
 ## Features
 
-- **Perpetual futures trading** on Hyperliquid L1
+- **Supports perpetual futures, spot and HIP-3 trading** on Hyperliquid L1
 - **Real-time market data** via WebSocket (l2Book, allMids)
 - **HTTP fallback** when WebSocket is unhealthy
-- **Native EIP-712 signing** (no Python dependency)
+- **Native EIP-712 signing**
 - **Position and order management** through Zorro's broker interface
 
 ## Architecture
@@ -77,10 +77,10 @@ copy build_vcpkg\Release\Hyperliquid_Dev.dll "C:\Zorro\Plugin\"
 
 ### 5. Configure in Zorro
 
-1. Select **Hyperliquid** (or **Hyperliquid-DEV**) as broker
+1. Select **Hyperliquid** as broker
 2. Enter your **wallet address** in the User field
 3. Enter your **private key** in the Password field
-4. Use testnet first: set `TESTNET=1` in your strategy
+4. Use testnet first: set `TESTNET=1` in accounts.csv or your strategy
 
 ## Testing
 
