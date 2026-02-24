@@ -1,0 +1,103 @@
+# Zorro Log Files
+*.log
+Log/
+diag.txt
+joehook_run.txt
+
+# Zorro Data and Cache
+History/
+Data/
+Cache/
+
+# Test outputs and temporary files
+test_output.txt
+tests/*.txt
+tests/*.json
+_ul
+_ul-*
+
+# Windows system files
+Thumbs.db
+*.lnk
+
+# Binary files (DLLs and EXEs - keep source code only)
+*.dll
+*.exe
+*.wav
+*.chm
+
+# Asset and config files (commented out - you may want to track these)
+# Assets.json
+# Zorro.ini
+# ZorroFix.ini
+
+# Third-party libraries and plugins (already installed)
+Plugin/
+Plugin64/
+Zorro64/
+
+# Screenshots and media
+*.png
+*.jpg
+*.jpeg
+
+# Batch test runners (keep setup scripts)
+run_*_test.bat
+test_*.bat
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Zip archives
+*.zip
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.vs/
+
+# API definition files (large, binary)
+api.def
+
+# Build output (CMake/MSVC generated files)
+build/
+build_vcpkg/
+build32/
+
+# Other binary/compiled
+*.o
+*.obj
+*.pdb
+nul
+
+# Claude Code config (machine-specific)
+.claude/
+.claudeignore
+CLAUDE.md
+AGENTS.md
+PRD.md
+PROGRESS.md
+
+# Zorro install junctions (create with mklink /J)
+Strategy/
+include/
+Source/
+
+# Third-party editors
+Notepad++/
+
+# Legacy code (archived locally)
+legacy/
+
+# Sprint/project management docs (local only, synced from Linear)
+docs/CURRENT_SPRINT.md
+docs/PREVIOUS_SPRINT.md
+docs/COMPLETED_ISSUES.md
+docs/KNOWN_ISSUES.md
+docs/LINEAR_SNAPSHOT.md
+
+# Environment variables (may contain API keys)
+.env
