@@ -28,7 +28,7 @@ REM ============================================================================
 REM Test 1: PIP/PIPCost/LotAmount Formulas
 REM Prevents bugs: 6dfb104, 213643c, 8303e8b
 REM =============================================================================
-echo [1/8] Testing PIP/PIPCost/LotAmount formulas...
+echo [1/9] Testing PIP/PIPCost/LotAmount formulas...
 call compile_broker_asset_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
@@ -43,7 +43,7 @@ REM ============================================================================
 REM Test 2: Multi-Asset Position Parsing
 REM Prevents bug: 81db4b6
 REM =============================================================================
-echo [2/8] Testing multi-asset position parsing...
+echo [2/9] Testing multi-asset position parsing...
 call compile_position_parsing_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
@@ -58,7 +58,7 @@ REM ============================================================================
 REM Test 3: IMPORTED Trade Position Tracking
 REM Prevents bug: 18c287c
 REM =============================================================================
-echo [3/8] Testing IMPORTED trade position tracking...
+echo [3/9] Testing IMPORTED trade position tracking...
 call compile_imported_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
@@ -73,7 +73,7 @@ REM ============================================================================
 REM Test 4: EIP-712 Mainnet vs Testnet Source
 REM Prevents bug: OPM-22 (e392a43)
 REM =============================================================================
-echo [4/8] Testing EIP-712 mainnet vs testnet source...
+echo [4/9] Testing EIP-712 mainnet vs testnet source...
 call compile_eip712_source_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
@@ -87,7 +87,7 @@ echo.
 REM =============================================================================
 REM Test 5: Existing utils tests (if they exist)
 REM =============================================================================
-echo [5/8] Testing utility functions...
+echo [5/9] Testing utility functions...
 if exist compile_utils_test.bat (
     call compile_utils_test.bat >nul 2>&1
     if !ERRORLEVEL! EQU 0 (
@@ -106,7 +106,7 @@ REM ============================================================================
 REM Test 6: GET_PRICE Context Isolation [OPM-6]
 REM Prevents bug: OPM-6 (GET_PRICE returns wrong asset's price)
 REM =============================================================================
-echo [6/8] Testing GET_PRICE context isolation...
+echo [6/9] Testing GET_PRICE context isolation...
 call compile_get_price_context_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
@@ -121,7 +121,7 @@ REM ============================================================================
 REM Test 7: Trigger Order Construction [OPM-77]
 REM Prevents bug: Silent STOP flag discard, incorrect trigger JSON
 REM =============================================================================
-echo [7/8] Testing trigger order construction...
+echo [7/9] Testing trigger order construction...
 call compile_trigger_order_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
@@ -136,7 +136,7 @@ REM ============================================================================
 REM Test 8: Partial Fill Detection [OPM-91]
 REM Prevents bug: Missing PartialFill status, HTTP fallback guard
 REM =============================================================================
-echo [8/8] Testing partial fill detection...
+echo [8/9] Testing partial fill detection...
 call compile_partial_fill_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
@@ -144,6 +144,21 @@ if !ERRORLEVEL! EQU 0 (
 ) else (
     set /a TESTS_FAILED+=1
     echo       FAILED - Partial fill detection tests failed!
+)
+echo.
+
+REM =============================================================================
+REM Test 9: lotSize Division-by-Zero Guard [OPM-158]
+REM Prevents bug: Division by zero when lotSize is 0 (uninitialized state)
+REM =============================================================================
+echo [9/9] Testing lotSize division-by-zero guard...
+call compile_lotsize_divzero_test.bat
+if !ERRORLEVEL! EQU 0 (
+    set /a TESTS_PASSED+=1
+    echo       PASSED
+) else (
+    set /a TESTS_FAILED+=1
+    echo       FAILED - lotSize division-by-zero guard tests failed!
 )
 echo.
 

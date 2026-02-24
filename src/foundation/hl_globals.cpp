@@ -8,7 +8,6 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
-#include <ctime>
 
 namespace hl {
 
@@ -78,9 +77,11 @@ int AssetRegistry::findByCoin(const char* coin) const {
 }
 
 const AssetInfo* AssetRegistry::getByIndex(int idx) const {
-    if (idx < 0 || idx >= count) return nullptr;
-    // No lock needed for read if caller ensures no concurrent writes
-    return &assets[idx];
+    if (idx < 0) return nullptr;
+    if (csInit) EnterCriticalSection(&cs);
+    const AssetInfo* result = (idx < count) ? &assets[idx] : nullptr;
+    if (csInit) LeaveCriticalSection(&cs);
+    return result;
 }
 
 bool AssetRegistry::add(const AssetInfo& info) {
@@ -126,8 +127,15 @@ int TradingState::generateTradeId() {
 }
 
 uint64_t TradingState::generateNonce() {
-    // Monotonic nonce prevents collision when orders placed in same millisecond
-    uint64_t now = static_cast<uint64_t>(time(nullptr)) * 1000;
+    // Monotonic nonce prevents collision when orders placed in same millisecond.
+    // Uses GetSystemTimeAsFileTime for ms precision (vs time() which was 1-second).
+    // [OPM-160]
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    uint64_t time64 = (static_cast<uint64_t>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+    time64 -= 116444736000000000ULL;  // Windows epoch -> Unix epoch
+    uint64_t now = time64 / 10000;    // 100ns intervals -> milliseconds
+
     uint64_t expected = lastNonce.load();
     uint64_t desired;
     do {

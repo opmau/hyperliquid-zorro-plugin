@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstring>
 #include <cmath>
+#include <limits>
 
 using namespace hl::utils;
 
@@ -117,12 +118,71 @@ void test_numeric_helpers() {
     printf("    OK\n\n");
 }
 
+void test_roundPriceForExchange() {
+    printf("[4] Testing roundPriceForExchange edge cases...\n");
+
+    // --- Normal cases (verify baseline behavior) ---
+    // BTC ~100000, szDecimals=5 -> pxDecimals=1 -> max 1 decimal place
+    // 5 sig figs of 100123.456 = 100120
+    assert(approxEqual(roundPriceForExchange(100123.456, 5), 100120.0));
+    printf("    BTC-range price OK\n");
+
+    // Small token ~0.012345, szDecimals=0 -> max 6 decimal places
+    // 5 sig figs of 0.012345 = 0.012345
+    assert(approxEqual(roundPriceForExchange(0.012345, 0), 0.012345));
+    printf("    Small token price OK\n");
+
+    // Integer price should pass through
+    assert(approxEqual(roundPriceForExchange(50000.0, 4), 50000.0));
+    printf("    Integer price OK\n");
+
+    // --- Edge case: zero (already handled) ---
+    assert(roundPriceForExchange(0.0, 4) == 0.0);
+    printf("    Zero price OK\n");
+
+    // --- Edge case: negative price (should return 0.0) ---
+    assert(roundPriceForExchange(-100.0, 4) == 0.0);
+    assert(roundPriceForExchange(-0.001, 2) == 0.0);
+    printf("    Negative price -> 0.0 OK\n");
+
+    // --- Edge case: NaN (should return 0.0) ---
+    double nan_val = std::numeric_limits<double>::quiet_NaN();
+    assert(roundPriceForExchange(nan_val, 4) == 0.0);
+    printf("    NaN price -> 0.0 OK\n");
+
+    // --- Edge case: infinity (should return 0.0) ---
+    double inf_val = std::numeric_limits<double>::infinity();
+    assert(roundPriceForExchange(inf_val, 4) == 0.0);
+    assert(roundPriceForExchange(-inf_val, 4) == 0.0);
+    printf("    Infinity price -> 0.0 OK\n");
+
+    // --- Edge case: extremely large price (>1e15, unsafe for 5 sig figs) ---
+    assert(roundPriceForExchange(1e16, 0) == 0.0);
+    assert(roundPriceForExchange(9.99e15, 0) == 0.0);
+    printf("    Extreme large price -> 0.0 OK\n");
+
+    // --- Edge case: very small positive price ---
+    // 0.00000123, szDecimals=0 -> maxDecPlaces=6, so rounds to 0.000001
+    // (5 sig figs gives 0.0000012300, then 6-decimal rounding truncates to 0.000001)
+    double tiny = roundPriceForExchange(0.00000123, 0);
+    assert(approxEqual(tiny, 0.000001, 1e-10));
+    printf("    Very small price OK (got %.10f)\n", tiny);
+
+    // With szDecimals=0 and higher maxDecimals, more precision preserved
+    double tiny2 = roundPriceForExchange(0.00000123, 0, 8);
+    assert(approxEqual(tiny2, 0.0000012300, 1e-12));
+    printf("    Very small price (maxDec=8) OK (got %.12f)\n", tiny2);
+
+    printf("    OK\n\n");
+}
+
 int main() {
     printf("=== hl_utils.h/cpp tests ===\n\n");
 
     test_string_helpers();
     test_time_helpers();
     test_numeric_helpers();
+    test_roundPriceForExchange();
 
     printf("=== All hl_utils tests passed! ===\n");
     return 0;

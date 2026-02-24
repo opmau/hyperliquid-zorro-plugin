@@ -161,6 +161,15 @@ double roundToTickSize(double price, double tickSize) {
 double roundPriceForExchange(double price, int szDecimals, int maxDecimals) {
     if (price == 0.0) return 0.0;
 
+    // Guard: reject non-finite values (NaN, infinity)
+    if (!isfinite(price)) return 0.0;
+
+    // Guard: reject negative prices (exchange prices are always positive)
+    if (price < 0.0) return 0.0;
+
+    // Guard: reject prices beyond safe double precision for 5 sig-fig rounding
+    if (price >= 1e15) return 0.0;
+
     // Step 1: Round to 5 significant figures (matches Python f"{px:.5g}")
     const int sigFigs = 5;
     double magnitude = floor(log10(fabs(price)));

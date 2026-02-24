@@ -220,7 +220,7 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
         HWND savedWindow = hl::g_config.zorroWindow;
         int savedDiagLevel = hl::g_config.diagLevel;
 
-        memset(&hl::g_config, 0, sizeof(hl::g_config));
+        SecureZeroMemory(&hl::g_config, sizeof(hl::g_config));
         hl::g_config.zorroWindow = savedWindow;
         hl::g_config.diagLevel = savedDiagLevel;
         hl::g_config.isTestnet = true;
@@ -378,7 +378,7 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
         }
 
         HWND savedWindow = hl::g_config.zorroWindow;
-        memset(&hl::g_config, 0, sizeof(hl::g_config));
+        SecureZeroMemory(&hl::g_config, sizeof(hl::g_config));
         hl::g_config.zorroWindow = savedWindow;
 
         return 0;

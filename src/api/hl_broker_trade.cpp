@@ -121,7 +121,9 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
     }
 
     // Return trade ID and fill info
-    if (pFill) *pFill = (int)round(result.filledSize / hl::g_trading.lotSize);
+    if (pFill) *pFill = (hl::g_trading.lotSize > 0)
+        ? (int)round(result.filledSize / hl::g_trading.lotSize)
+        : (int)round(result.filledSize);
     if (pPrice) *pPrice = result.avgPrice > 0 ? result.avgPrice : request.limitPrice;
 
     // Bridge fill → position cache so GET_POSITION sees it immediately [OPM-85]
@@ -211,8 +213,8 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
         return 0;
     }
 
-    if (pFill) *pFill = (result.filledSize > 0) ?
-                        (int)round(result.filledSize / hl::g_trading.lotSize) : abs(amount);
+    if (pFill) *pFill = (result.filledSize > 0 && hl::g_trading.lotSize > 0)
+        ? (int)round(result.filledSize / hl::g_trading.lotSize) : abs(amount);
     if (pClose) *pClose = result.avgPrice > 0 ? result.avgPrice : request.limitPrice;
 
     // Bridge fill → position cache so GET_POSITION sees it immediately [OPM-85]
@@ -438,7 +440,9 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
     }
 
     if (state.filledSize > 0) {
-        int fillLots = (int)round(state.filledSize / hl::g_trading.lotSize);
+        int fillLots = (hl::g_trading.lotSize > 0)
+            ? (int)round(state.filledSize / hl::g_trading.lotSize)
+            : (int)round(state.filledSize);
         return (fillLots > 0) ? fillLots : 1;
     }
 
