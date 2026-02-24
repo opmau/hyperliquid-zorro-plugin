@@ -1,0 +1,103 @@
+// ============================================================================
+// Claude Code Hooks Configuration Template
+// ============================================================================
+//
+// HOW TO USE:
+//   1. Copy the hooks you want into your .claude/settings.local.json
+//   2. Replace [BRACKETED] placeholders with your project values
+//   3. Remove comments (JSONC is for documentation only — settings.json must be pure JSON)
+//   4. Test each hook by running Claude Code and triggering the event
+//
+// WHERE TO PUT:
+//   .claude/settings.local.json  — Project-specific, not committed to git
+//   .claude/settings.json        — Project-specific, committed to git (team-shared)
+//   ~/.claude/settings.json      — All projects (global)
+//
+// HOOK EVENTS:
+//   PreToolUse          — Before Claude uses a tool (can block/modify)
+//   PostToolUse         — After Claude uses a tool (can run follow-up)
+//   Stop                — When Claude finishes responding (can add follow-up tasks)
+//   PreCompact          — Before context compaction (can inject critical info)
+//   SessionStart        — When session starts/resumes
+//   SessionEnd          — When session ends
+//   UserPromptSubmit    — When user sends a message
+//   SubagentStart/Stop  — When subagent is launched/completes
+//
+// EXIT CODES (for command hooks):
+//   0 = allow/proceed
+//   2 = block/deny
+// ============================================================================
+{
+  "hooks": {
+
+    // ══════════════════════════════════════════════════════════════════════
+    // RECOMMENDED: Scope Guardrail
+    // Warns Claude when editing files outside the src/ and tests/ directories
+    // Prevents accidental changes to config, build, or docs files
+    // ══════════════════════════════════════════════════════════════════════
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[PROJECT_ROOT]/.claude/hooks/check-scope.sh",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+
+    // ══════════════════════════════════════════════════════════════════════
+    // RECOMMENDED: Post-Edit File Size Check
+    // After any file edit, check if the file now exceeds size limits
+    // Warns Claude but doesn't block — lets it decide how to split
+    // ══════════════════════════════════════════════════════════════════════
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[PROJECT_ROOT]/.claude/hooks/check-file-size.sh",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+
+    // ══════════════════════════════════════════════════════════════════════
+    // RECOMMENDED: Feedback Loop Enforcement
+    // When Claude finishes a response, prompt it to consider doc updates
+    // This enforces the "Post-Session Review" from CLAUDE.md
+    // ══════════════════════════════════════════════════════════════════════
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[PROJECT_ROOT]/.claude/hooks/session-check.sh",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+
+    // ══════════════════════════════════════════════════════════════════════
+    // RECOMMENDED: Critical Rules Survival
+    // Before context compaction, re-inject the most critical rules so
+    // they survive even when conversation history is compressed
+    // ══════════════════════════════════════════════════════════════════════
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[PROJECT_ROOT]/.claude/hooks/inject-critical-rules.sh",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "hyperliquid-plugin",
+  "version-string": "2.0.0",
+  "description": "Hyperliquid broker plugin for Zorro",
+  "dependencies": [
+    {
+      "name": "ixwebsocket",
+      "features": ["ssl", "mbedtls"]
+    }
+  ]
+}

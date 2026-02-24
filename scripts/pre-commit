@@ -1,0 +1,38 @@
+#!/bin/bash
+#=============================================================================
+# pre-commit hook - Run unit tests before every commit
+#=============================================================================
+# Install with: scripts/install_hooks.bat
+# Or manually: cp scripts/pre-commit .git/hooks/pre-commit
+#
+# This hook ensures that known-bad code patterns cannot be committed.
+# Specifically:
+#   - PIP/PIPCost formula errors (caused million-dollar profit displays)
+#   - Multi-asset position parsing bugs (caused wrong trade decisions)
+#   - Lot sizing errors (caused order rejections)
+#=============================================================================
+
+echo "=== Pre-Commit Hook: Running Unit Tests ==="
+echo ""
+
+# Get the root directory of the repository
+REPO_ROOT=$(git rev-parse --show-toplevel)
+
+# Run the test suite (Windows batch file)
+# Use cmd.exe to run the batch file from Git Bash
+cmd.exe /c "cd /d $REPO_ROOT\\tests && run_unit_tests.bat"
+TEST_RESULT=$?
+
+if [ $TEST_RESULT -ne 0 ]; then
+    echo ""
+    echo "=== COMMIT BLOCKED ==="
+    echo "Unit tests failed. Please fix the issues before committing."
+    echo ""
+    echo "To bypass (NOT RECOMMENDED): git commit --no-verify"
+    echo ""
+    exit 1
+fi
+
+echo ""
+echo "=== All tests passed - Proceeding with commit ==="
+exit 0
