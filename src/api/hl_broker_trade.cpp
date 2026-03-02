@@ -30,6 +30,12 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
 
     if (!symbol || !*symbol || !volume) return 0;
 
+    // Fatal error: stop all trading [OPM-170]
+    if (hl::g_fatalError.load()) {
+        hl::g_logger.logf(1, "BrokerBuy2: BLOCKED — %s", hl::g_fatalErrorMsg);
+        return 0;
+    }
+
     bool isCloseOrder = (stopDist == -1);
 
     // Detect trigger (stop-loss) order [OPM-77]

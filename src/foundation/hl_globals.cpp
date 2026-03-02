@@ -24,6 +24,10 @@ Logger        g_logger;
 void* g_wsManager = nullptr;
 void* g_priceCache = nullptr;
 
+// Fatal error — stops all broker functions [OPM-170]
+std::atomic<bool> g_fatalError{false};
+char g_fatalErrorMsg[256] = {0};
+
 // =============================================================================
 // ASSET REGISTRY IMPLEMENTATION
 // =============================================================================
@@ -223,6 +227,10 @@ void initGlobals() {
     // WebSocket pointers start as nullptr
     g_wsManager = nullptr;
     g_priceCache = nullptr;
+
+    // Clear fatal error
+    g_fatalError = false;
+    g_fatalErrorMsg[0] = 0;
 }
 
 void cleanupGlobals() {

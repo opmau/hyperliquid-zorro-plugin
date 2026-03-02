@@ -25,6 +25,12 @@ DLLFUNC int BrokerAsset(char* symbol, double* pPrice, double* pSpread,
                         double* pRollLong, double* pRollShort) {
     if (!symbol || !*symbol) return 0;
 
+    // Fatal error: stop all trading [OPM-170]
+    if (hl::g_fatalError.load()) {
+        hl::g_logger.logf(1, "BrokerAsset: BLOCKED — %s", hl::g_fatalErrorMsg);
+        return 0;
+    }
+
     if (hl::g_config.diagLevel >= 3) {
         hl::g_logger.logf(3, "BrokerAsset: %s", symbol);
     }
@@ -126,6 +132,12 @@ DLLFUNC int BrokerAsset(char* symbol, double* pPrice, double* pSpread,
 DLLFUNC int BrokerAccount(char* accountId, double* pBalance,
                           double* pTradeVal, double* pMarginVal) {
     if (!hl::g_config.walletAddress[0]) return 0;
+
+    // Fatal error: stop all trading [OPM-170]
+    if (hl::g_fatalError.load()) {
+        hl::g_logger.logf(1, "BrokerAccount: BLOCKED — %s", hl::g_fatalErrorMsg);
+        return 0;
+    }
 
     // Get balance from WS cache
     hl::account::Balance balance = hl::account::getBalance();
