@@ -74,10 +74,10 @@ static void setupRegistry() {
         hl::g_assets.add(info);
     }
 
-    // PerpDex asset: TSLA-USDC.xyz
+    // PerpDex asset: TSLA-USDC_xyz
     {
         hl::AssetInfo info;
-        strncpy_s(info.name, "TSLA-USDC.xyz", _TRUNCATE);
+        strncpy_s(info.name, "TSLA-USDC_xyz", _TRUNCATE);
         strncpy_s(info.coin, "TSLA", _TRUNCATE);
         strncpy_s(info.collateral, "USDC", _TRUNCATE);
         info.index = 3;  // sequential in registry
@@ -91,10 +91,10 @@ static void setupRegistry() {
         hl::g_assets.add(info);
     }
 
-    // PerpDex asset: GOLD-USDC.xyz
+    // PerpDex asset: GOLD-USDC_xyz
     {
         hl::AssetInfo info;
-        strncpy_s(info.name, "GOLD-USDC.xyz", _TRUNCATE);
+        strncpy_s(info.name, "GOLD-USDC_xyz", _TRUNCATE);
         strncpy_s(info.coin, "GOLD", _TRUNCATE);
         strncpy_s(info.collateral, "USDC", _TRUNCATE);
         info.index = 4;
@@ -164,8 +164,8 @@ void test_spot_noncanonical_found_by_at_format() {
 //=============================================================================
 
 void test_perpdex_found_by_display_name() {
-    // BrokerAsset line 42: getAsset(symbol) where symbol = "TSLA-USDC.xyz"
-    int idx = hl::g_assets.findByName("TSLA-USDC.xyz");
+    // BrokerAsset line 42: getAsset(symbol) where symbol = "TSLA-USDC_xyz"
+    int idx = hl::g_assets.findByName("TSLA-USDC_xyz");
     ASSERT_GE(idx, 0);
 
     const hl::AssetInfo* asset = hl::g_assets.getByIndex(idx);
@@ -182,11 +182,11 @@ void test_perpdex_found_by_bare_coin() {
     const hl::AssetInfo* asset = hl::g_assets.getByIndex(idx);
     ASSERT_NOT_NULL(asset);
     ASSERT_TRUE(asset->isPerpDex);
-    ASSERT_STREQ(asset->name, "TSLA-USDC.xyz");
+    ASSERT_STREQ(asset->name, "TSLA-USDC_xyz");
 }
 
 void test_perpdex_gold_found_by_display_name() {
-    int idx = hl::g_assets.findByName("GOLD-USDC.xyz");
+    int idx = hl::g_assets.findByName("GOLD-USDC_xyz");
     ASSERT_GE(idx, 0);
 
     const hl::AssetInfo* asset = hl::g_assets.getByIndex(idx);
@@ -224,7 +224,7 @@ void test_nonexistent_asset_returns_negative() {
 
 void test_api_format_not_in_registry() {
     // "xyz:TSLA" is the API format, NOT stored as coin or name
-    // Registry stores coin="TSLA", name="TSLA-USDC.xyz"
+    // Registry stores coin="TSLA", name="TSLA-USDC_xyz"
     ASSERT_EQ(hl::g_assets.findByName("xyz:TSLA"), -1);
     ASSERT_EQ(hl::g_assets.findByCoin("xyz:TSLA"), -1);
 }
@@ -236,7 +236,7 @@ void test_api_format_not_in_registry() {
 void test_lookup_case_insensitive() {
     // findByName and findByCoin use _stricmp
     ASSERT_GE(hl::g_assets.findByName("purr/usdc"), 0);
-    ASSERT_GE(hl::g_assets.findByName("tsla-usdc.xyz"), 0);
+    ASSERT_GE(hl::g_assets.findByName("tsla-usdc_xyz"), 0);
     ASSERT_GE(hl::g_assets.findByCoin("btc"), 0);
 }
 
