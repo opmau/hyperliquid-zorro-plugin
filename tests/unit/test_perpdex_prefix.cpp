@@ -5,7 +5,7 @@
 // (e.g., "xyz:TSLA") but fetchPerpDexMeta did NOT strip this prefix.
 //
 // This caused:
-//   - Stored asset name = "xyz:TSLA-USDC.xyz" instead of "TSLA-USDC.xyz"
+//   - Stored asset name = "xyz:TSLA-USDC_xyz" instead of "TSLA-USDC_xyz"
 //   - Stored asset coin = "xyz:TSLA" instead of "TSLA"
 //   - BrokerAsset price query couldn't find asset → fell to defaults
 //   - Wrong PIP=1.0, LotAmount=0.0001, PIPCost=0.0001
@@ -67,12 +67,12 @@ TEST_CASE(stripped_coin_builds_correct_name) {
     // Simulate fetchPerpDexMeta flow:
     // 1. API returns "xyz:TSLA"
     // 2. Strip prefix → "TSLA"
-    // 3. buildCoinName("xyz", "TSLA", "USDC") → "TSLA-USDC.xyz"
+    // 3. buildCoinName("xyz", "TSLA", "USDC") → "TSLA-USDC_xyz"
     char bareCoin[64];
     stripApiCoinPrefix("xyz:TSLA", bareCoin, sizeof(bareCoin));
 
     std::string display = buildCoinName("xyz", bareCoin, "USDC");
-    ASSERT_STREQ(display.c_str(), "TSLA-USDC.xyz");
+    ASSERT_STREQ(display.c_str(), "TSLA-USDC_xyz");
 
     // CRITICAL: no colon in display name (breaks Zorro broker:symbol parsing)
     ASSERT_MSG(display.find(':') == std::string::npos,

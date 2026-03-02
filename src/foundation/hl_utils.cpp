@@ -48,12 +48,12 @@ bool parsePerpDex(const char* fullName, char* perpDex, size_t perpDexSize,
                   char* coin, size_t coinSize) {
     if (!fullName || !perpDex || !coin) return false;
 
-    // Split at LAST dot to extract perpDex venue suffix
-    // "GOLD-USDC.xyz" -> perpDex="xyz", coin="GOLD-USDC"
-    // "A.B-USDC.xyz"  -> perpDex="xyz", coin="A.B-USDC" (last dot wins)
-    const char* lastDot = strrchr(fullName, '.');
+    // Split at LAST underscore to extract perpDex venue suffix [OPM-169]
+    // "GOLD-USDC_xyz" -> perpDex="xyz", coin="GOLD-USDC"
+    // "A.B-USDC_xyz"  -> perpDex="xyz", coin="A.B-USDC" (last underscore wins)
+    const char* lastDot = strrchr(fullName, '_');
     if (lastDot && lastDot > fullName && lastDot[1] != '\0') {
-        // Has perpDex suffix after the dot
+        // Has perpDex suffix after the underscore
         size_t coinLen = lastDot - fullName;
         if (coinLen < coinSize) {
             strncpy_s(coin, coinSize, fullName, coinLen);
@@ -64,7 +64,7 @@ bool parsePerpDex(const char* fullName, char* perpDex, size_t perpDexSize,
         strncpy_s(perpDex, perpDexSize, lastDot + 1, _TRUNCATE);
         return true;
     } else {
-        // No dot — perp, spot, or legacy bare coin
+        // No underscore — perp, spot, or legacy bare coin
         perpDex[0] = '\0';
         strncpy_s(coin, coinSize, fullName, _TRUNCATE);
         return false;
@@ -82,9 +82,9 @@ std::string buildCoinName(const char* perpDex, const char* coin,
         result += collateral;
     }
 
-    // Append perpDex venue suffix if provided: "BTC-USDC" + "xyz" -> "BTC-USDC.xyz"
+    // Append perpDex venue suffix if provided: "BTC-USDC" + "xyz" -> "BTC-USDC_xyz" [OPM-169]
     if (perpDex && *perpDex) {
-        result += ".";
+        result += "_";
         result += perpDex;
     }
 

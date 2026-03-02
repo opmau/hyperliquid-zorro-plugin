@@ -128,13 +128,13 @@ static void onOrderUpdate(const char* oid, const char* cloid,
 // HELPER FUNCTIONS (shared with hl_broker_market.cpp, hl_broker_trade.cpp)
 //=============================================================================
 
-// Parse Zorro symbol into perpDex venue and API coin name
+// Parse Zorro symbol into perpDex venue and API coin name [OPM-169]
 // Handles all three asset types:
-//   "GOLD-USDC.xyz" → perpDex="xyz", coin="GOLD" (perpDex: dot-suffix)
-//   "BTC-USDC"      → perpDex="",    coin="BTC"  (perp: strip collateral)
-//   "BTC/USDC"      → perpDex="",    coin="BTC/USDC" (spot: keep as-is)
-//   "@107"           → perpDex="",    coin="@107" (spot @-format)
-//   "BTC"            → perpDex="",    coin="BTC"  (legacy bare coin)
+//   "GOLD-USDC_xyz"  → perpDex="xyz", coin="GOLD" (perpDex: underscore-suffix)
+//   "BTC-USDC"       → perpDex="",    coin="BTC"  (perp: strip collateral)
+//   "BTC/USDC"       → perpDex="",    coin="BTC/USDC" (spot: keep as-is)
+//   "@107"            → perpDex="",    coin="@107" (spot @-format)
+//   "BTC"             → perpDex="",    coin="BTC"  (legacy bare coin)
 void parsePerpDex(const char* symbol, char* perpDex, size_t perpDexSize,
                   char* coin, size_t coinSize) {
     perpDex[0] = '\0';
@@ -148,9 +148,9 @@ void parsePerpDex(const char* symbol, char* perpDex, size_t perpDexSize,
         return;
     }
 
-    // PerpDex: dot-suffix format (GOLD-USDC.xyz)
-    // Split at last dot → perpDex=venue, remainder=COIN-COLLATERAL
-    if (strchr(symbol, '.')) {
+    // PerpDex: underscore-suffix format (GOLD-USDC_xyz) [OPM-169]
+    // Split at last underscore → perpDex=venue, remainder=COIN-COLLATERAL
+    if (strchr(symbol, '_')) {
         char displayCoin[64];
         hl::utils::parsePerpDex(symbol, perpDex, perpDexSize,
                                 displayCoin, sizeof(displayCoin));
