@@ -447,7 +447,7 @@ void WebSocketManager::requeueSubscriptionsAfterReconnect() {
     for (const auto& coin : dropped) {
         logf(1, "WS: Symbol '%s' NOT FOUND on exchange — "
              "caused %d consecutive disconnects, subscription removed. "
-             "Check asset name or perpDex format. [OPM-170]",
+             "Check asset name or perpDex format.",
              coin.c_str(), MAX_REQUEUE_WITHOUT_DATA + 1);
         bannedL2Coins_.insert(coin);
     }
