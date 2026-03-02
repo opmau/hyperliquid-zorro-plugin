@@ -10,6 +10,7 @@
 #include "ws_manager.h"
 #include "ws_parsers.h"
 #include "json_helpers.h"
+#include "../foundation/hl_globals.h"
 #include <IXNetSystem.h>
 #include <cstdio>
 #include <cstdarg>
@@ -452,10 +453,13 @@ void WebSocketManager::requeueSubscriptionsAfterReconnect() {
     }
 
     // Fatal: toxic subscription crashed the connection repeatedly.
-    // Stop WS entirely so Zorro halts the strategy with a clear error.
+    // Set global fatal error so ALL broker functions return failure → Zorro stops.
     if (!dropped.empty()) {
-        log(1, "WS: STOPPING — invalid symbol caused repeated disconnects. "
+        log(1, "WS: FATAL — invalid symbol caused repeated disconnects. "
              "Fix the asset list and restart.");
+        sprintf_s(hl::g_fatalErrorMsg, "Symbol '%s' not found on exchange",
+                  dropped[0].c_str());
+        hl::g_fatalError = true;
         connection_.stopAutoReconnect();
         return;  // Don't requeue anything — connection is done
     }
