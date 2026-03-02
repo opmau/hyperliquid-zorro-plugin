@@ -267,6 +267,12 @@ void WebSocketManager::subscribeInitialChannels() {
 // --- Subscriptions ---
 
 void WebSocketManager::subscribeL2Book(const std::string& coin) {
+    // Reject coins that were banned for causing disconnects [OPM-170]
+    if (bannedL2Coins_.count(coin)) {
+        logf(1, "WS: Rejecting l2Book subscription for banned coin '%s'", coin.c_str());
+        return;
+    }
+
     EnterCriticalSection(&l2SubCs_);
     // Check if already subscribed or pending
     for (const auto& c : l2Subscriptions_) if (c == coin) { LeaveCriticalSection(&l2SubCs_); return; }
@@ -406,10 +412,45 @@ void WebSocketManager::sendPendingAccountSubscriptions() {
 }
 
 void WebSocketManager::requeueSubscriptionsAfterReconnect() {
+    const int MAX_REQUEUE_WITHOUT_DATA = 3;  // Drop after 3 reconnects with no data [OPM-170]
+
     EnterCriticalSection(&l2SubCs_);
-    for (const auto& coin : l2Subscriptions_) pendingL2Subs_.push_back(coin);
+    for (const auto& coin : l2Subscriptions_) {
+        if (cache_.getBid(coin) > 0) {
+            // Coin has received data before — safe to requeue
+            l2RequeueFailCount_.erase(coin);
+            pendingL2Subs_.push_back(coin);
+        } else {
+            // Never received data — might be causing the disconnect
+            int& count = l2RequeueFailCount_[coin];
+            count++;
+            if (count <= MAX_REQUEUE_WITHOUT_DATA) {
+                pendingL2Subs_.push_back(coin);
+            }
+            // else: silently dropped — logged below outside CS
+        }
+    }
+    // Collect dropped coins for logging outside critical section
+    std::vector<std::string> dropped;
+    for (auto it = l2RequeueFailCount_.begin(); it != l2RequeueFailCount_.end(); ) {
+        if (it->second > MAX_REQUEUE_WITHOUT_DATA) {
+            dropped.push_back(it->first);
+            it = l2RequeueFailCount_.erase(it);
+        } else {
+            ++it;
+        }
+    }
     l2Subscriptions_.clear();
     LeaveCriticalSection(&l2SubCs_);
+
+    for (const auto& coin : dropped) {
+        logf(1, "WS: Symbol '%s' NOT FOUND on exchange — "
+             "caused %d consecutive disconnects, subscription removed. "
+             "Check asset name or perpDex format. [OPM-170]",
+             coin.c_str(), MAX_REQUEUE_WITHOUT_DATA + 1);
+        // Remember banned coins so BrokerAsset can report failure
+        bannedL2Coins_.insert(coin);
+    }
 
     EnterCriticalSection(&accountSubCs_);
     if (subscribedUserFills_) { pendingUserFillsSub_ = true; subscribedUserFills_ = false; }
@@ -597,6 +638,22 @@ void WebSocketManager::parsePostResponse(const char* json) {
     auto evIt = responseEvents_.find(resp.requestId);
     if (evIt != responseEvents_.end() && evIt->second) SetEvent(evIt->second);
     LeaveCriticalSection(&responseCs_);
+}
+
+bool WebSocketManager::isCoinBanned(const std::string& coin) const {
+    // No lock needed — bannedL2Coins_ is only written from connectionLoop thread
+    // and read from main thread. Worst case: brief race returns false (safe).
+    return bannedL2Coins_.count(coin) > 0;
+}
+
+// --- Debug ---
+
+void WebSocketManager::forceDisconnectForTest() {
+    // Force a disconnect without disabling auto-reconnect.
+    // This simulates a server-side drop (code 1006 scenario).
+    // IXWebSocket will auto-reconnect, triggering the wasReconnected() path.
+    log(1, "WS: DEBUG — forcing disconnect (auto-reconnect stays active)");
+    connection_.forceCloseForTest();
 }
 
 // --- Index Mappings ---
