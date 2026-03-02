@@ -393,7 +393,7 @@ OrderResult placeOrderWithId(const OrderRequest& request, int tradeId) {
     // STEP 5: Submit to exchange via HTTP
     http::Response resp = http::exchangePost(orderJson);
     if (!resp.success()) {
-        logMsg(1, "placeOrder", "HTTP request failed — querying exchange for order status [OPM-89]");
+        logMsg(1, "placeOrder", "HTTP request failed — querying exchange for order status");
 
         Sleep(1000);
 

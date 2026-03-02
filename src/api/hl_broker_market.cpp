@@ -25,9 +25,14 @@ DLLFUNC int BrokerAsset(char* symbol, double* pPrice, double* pSpread,
                         double* pRollLong, double* pRollShort) {
     if (!symbol || !*symbol) return 0;
 
-    // Fatal error: stop all trading [OPM-170]
+    // Fatal error: halt strategy [OPM-170]
     if (hl::g_fatalError.load()) {
-        hl::g_logger.logf(1, "BrokerAsset: BLOCKED — %s", hl::g_fatalErrorMsg);
+        static bool halted = false;
+        if (!halted) {
+            halted = true;
+            hl::g_logger.logf(1, "FATAL: %s", hl::g_fatalErrorMsg);
+            zorroQuit(hl::g_fatalErrorMsg);
+        }
         return 0;
     }
 
@@ -45,10 +50,7 @@ DLLFUNC int BrokerAsset(char* symbol, double* pPrice, double* pSpread,
     if (hl::g_wsManager) {
         auto* wsMgr = static_cast<hl::ws::WebSocketManager*>(hl::g_wsManager);
         if (wsMgr->isCoinBanned(coinForApi)) {
-            hl::g_logger.logf(1, "BrokerAsset: %s REJECTED — "
-                "symbol caused WebSocket disconnects (not available on exchange)",
-                coinForApi.c_str());
-            return 0;
+            return 0;  // Fatal error already logged once above
         }
     }
 
@@ -133,10 +135,9 @@ DLLFUNC int BrokerAccount(char* accountId, double* pBalance,
                           double* pTradeVal, double* pMarginVal) {
     if (!hl::g_config.walletAddress[0]) return 0;
 
-    // Fatal error: stop all trading [OPM-170]
+    // Fatal error: halt strategy [OPM-170]
     if (hl::g_fatalError.load()) {
-        hl::g_logger.logf(1, "BrokerAccount: BLOCKED — %s", hl::g_fatalErrorMsg);
-        return 0;
+        return 0;  // quit already called from BrokerAsset
     }
 
     // Get balance from WS cache
