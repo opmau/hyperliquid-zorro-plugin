@@ -221,6 +221,14 @@ PriceData getPrice(const char* coin, uint32_t maxAgeMs) {
         return result;
     }
 
+    // "null" response = asset does not exist on exchange — halt immediately
+    if (resp.body == "null") {
+        g_fatalError = true;
+        sprintf_s(g_fatalErrorMsg, "Symbol '%s' not found on exchange", coin);
+        g_logger.logf(1, "FATAL: %s", g_fatalErrorMsg);
+        return result;
+    }
+
     // Parse bid/ask from response using yyjson
     // Format: {"levels":[[{"px":"50000",...}],[{"px":"50001",...}]]}
     const char* jsonStr = resp.body.c_str();

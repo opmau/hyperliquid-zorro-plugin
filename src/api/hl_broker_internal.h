@@ -95,6 +95,7 @@ extern const DWORD HTTP_FALLBACK_COOLDOWN_MS;
 void parsePerpDex(const char* symbol, char* perpDex, size_t perpDexSize,
                   char* coin, size_t coinSize);
 std::string buildCoinForApi(const char* perpDex, const char* coin);
+void zorroQuit(const char* reason);  // Halt strategy like pressing [Stop]
 
 // BrokerCommand handler (defined in hl_broker_commands.cpp)
 double handleBrokerCommand(int mode, intptr_t parameter);
