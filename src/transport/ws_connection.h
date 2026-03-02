@@ -114,6 +114,10 @@ public:
     /// Caller should re-subscribe channels when this returns true. [OPM-128]
     bool wasReconnected();
 
+    /// Debug: force-close the underlying socket (simulates server drop).
+    /// Auto-reconnect stays active, so IXWebSocket will reconnect. [OPM-170]
+    void forceCloseForTest();
+
 private:
     // IXWebSocket instance
     ix::WebSocket ws_;

@@ -14,6 +14,7 @@
 #include "ws_price_cache.h"
 #include <queue>
 #include <map>
+#include <set>
 #include <atomic>
 
 namespace hl {
@@ -105,6 +106,12 @@ public:
 
     PriceCache& getPriceCache() { return cache_; }
 
+    /// Debug: force WS disconnect to test auto-reconnect behavior [OPM-170]
+    void forceDisconnectForTest();
+
+    /// Check if a coin was banned due to causing repeated disconnects [OPM-170]
+    bool isCoinBanned(const std::string& coin) const;
+
 private:
     // Core components
     PriceCache& cache_;
@@ -150,6 +157,10 @@ private:
     int consecutiveReconnects_;
     bool circuitOpen_;
     DWORD circuitOpenedAt_;
+
+    // Toxic subscription tracking — coins that cause disconnects [OPM-170]
+    std::map<std::string, int> l2RequeueFailCount_;
+    std::set<std::string> bannedL2Coins_;  // Coins permanently dropped from subscriptions
 
     // Response correlation
     CRITICAL_SECTION responseCs_;
