@@ -35,6 +35,17 @@ DLLFUNC int BrokerAsset(char* symbol, double* pPrice, double* pSpread,
 
     std::string coinForApi = buildCoinForApi(perpDex, coin);
 
+    // Reject coins that were banned for causing WS disconnects [OPM-170]
+    if (hl::g_wsManager) {
+        auto* wsMgr = static_cast<hl::ws::WebSocketManager*>(hl::g_wsManager);
+        if (wsMgr->isCoinBanned(coinForApi)) {
+            hl::g_logger.logf(1, "BrokerAsset: %s REJECTED — "
+                "symbol caused WebSocket disconnects (not available on exchange)",
+                coinForApi.c_str());
+            return 0;
+        }
+    }
+
     // Subscription mode: pPrice=NULL means "subscribe this asset"
     // Per Zorro docs (brokerplugin.md): return 1 if asset is available, no price needed
     if (!pPrice) {

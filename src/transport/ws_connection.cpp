@@ -99,6 +99,14 @@ bool Connection::wasReconnected() {
     return reconnected_.exchange(false);
 }
 
+void Connection::forceCloseForTest() {
+    // Close the WebSocket with a normal close code, which will trigger
+    // the Close callback → disconnected state → auto-reconnect.
+    // This simulates a server-initiated close. [OPM-170]
+    log(1, "WS: DEBUG — force closing socket");
+    ws_.close();
+}
+
 //=============================================================================
 // IX MESSAGE CALLBACK (fires on IXWebSocket's internal thread)
 //=============================================================================

@@ -428,6 +428,15 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         return ok ? 1 : 0;
     }
 
+    case HL_FORCE_WS_DISCONNECT: {
+        // Debug: force WebSocket disconnect to test auto-reconnect [OPM-170]
+        if (!hl::g_wsManager) return 0;
+        auto* wsMgr = static_cast<hl::ws::WebSocketManager*>(hl::g_wsManager);
+        hl::g_logger.log(1, "DEBUG: Forcing WS disconnect (OPM-170 test)");
+        wsMgr->forceDisconnectForTest();
+        return 1;
+    }
+
     default:
         if (hl::g_config.diagLevel >= 3) {
             char msg[64];
