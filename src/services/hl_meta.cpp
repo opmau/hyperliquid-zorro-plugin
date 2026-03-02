@@ -338,7 +338,7 @@ int fetchPerpDexMeta(const char* perpDex) {
         int maxLeverage = (int)json::getInt64(item, "maxLeverage");
         if (maxLeverage <= 0) maxLeverage = 20;
 
-        // Build display name: COIN-COLLATERAL.venue (e.g., "GOLD-USDC.xyz")
+        // Build display name: COIN-COLLATERAL_venue (e.g., "GOLD-USDC_xyz") [OPM-169]
         std::string displayName = utils::buildCoinName(perpDex, coinName, collateralName);
 
         // PerpDex uses same formula as regular perps (MAX_DECIMALS=6)
@@ -426,7 +426,7 @@ int fetchAllPerpDexMeta() {
 int findAssetIndex(const char* coin) {
     if (!coin || !*coin) return -1;
 
-    // Try display name lookup (handles "BTC-USDC", "GOLD-USDC.xyz", "BTC/USDC")
+    // Try display name lookup (handles "BTC-USDC", "GOLD-USDC_xyz", "BTC/USDC")
     int idx = g_assets.findByName(coin);
     if (idx >= 0) return idx;
 

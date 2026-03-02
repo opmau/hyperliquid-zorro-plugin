@@ -36,9 +36,9 @@ void test_string_helpers() {
     assert(strcmp(coin, "@107") == 0);   // @-format preserved for spot
     printf("    normalizeCoin OK\n");
 
-    // parsePerpDex (dot-suffix format, OPM-132)
+    // parsePerpDex (underscore-suffix format, OPM-132/OPM-169)
     char perpDex[32], coinPart[64];
-    assert(parsePerpDex("GOLD-USDC.xyz", perpDex, sizeof(perpDex), coinPart, sizeof(coinPart)));
+    assert(parsePerpDex("GOLD-USDC_xyz", perpDex, sizeof(perpDex), coinPart, sizeof(coinPart)));
     assert(strcmp(perpDex, "xyz") == 0);
     assert(strcmp(coinPart, "GOLD-USDC") == 0);
     assert(!parsePerpDex("BTC-USDC", perpDex, sizeof(perpDex), coinPart, sizeof(coinPart)));
@@ -49,8 +49,8 @@ void test_string_helpers() {
     assert(strcmp(coinPart, "BTC") == 0);
     printf("    parsePerpDex OK\n");
 
-    // buildCoinName (3-arg with collateral, OPM-132)
-    assert(buildCoinName("xyz", "GOLD", "USDC") == "GOLD-USDC.xyz");
+    // buildCoinName (3-arg with collateral, OPM-132/OPM-169)
+    assert(buildCoinName("xyz", "GOLD", "USDC") == "GOLD-USDC_xyz");
     assert(buildCoinName("", "BTC", "USDC") == "BTC-USDC");
     assert(buildCoinName("", "BTC", "") == "BTC");
     assert(buildCoinName(nullptr, "ETH") == "ETH");
