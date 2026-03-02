@@ -448,8 +448,16 @@ void WebSocketManager::requeueSubscriptionsAfterReconnect() {
              "caused %d consecutive disconnects, subscription removed. "
              "Check asset name or perpDex format. [OPM-170]",
              coin.c_str(), MAX_REQUEUE_WITHOUT_DATA + 1);
-        // Remember banned coins so BrokerAsset can report failure
         bannedL2Coins_.insert(coin);
+    }
+
+    // Fatal: toxic subscription crashed the connection repeatedly.
+    // Stop WS entirely so Zorro halts the strategy with a clear error.
+    if (!dropped.empty()) {
+        log(1, "WS: STOPPING — invalid symbol caused repeated disconnects. "
+             "Fix the asset list and restart.");
+        connection_.stopAutoReconnect();
+        return;  // Don't requeue anything — connection is done
     }
 
     EnterCriticalSection(&accountSubCs_);
