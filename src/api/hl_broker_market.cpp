@@ -198,6 +198,23 @@ DLLFUNC int BrokerAccount(char* accountId, double* pBalance,
         hl::account::refreshBalance();
         hl::account::refreshSpotBalance();
         balance = hl::account::getBalance();
+
+        // [OPM-136] After HTTP confirmation, halt if zero balance AND zero positions.
+        // This prevents strategies from trading with stale/wrong data (e.g., agent
+        // wallet address in User field returns empty clearinghouseState).
+        if (balance.accountValue <= 0) {
+            auto positions = hl::account::getAllPositions();
+            if (positions.empty()) {
+                if (hl::g_logger.callback) {
+                    hl::g_logger.callback(
+                        "HALT: Account shows zero balance AND zero positions. "
+                        "If you have funds on Hyperliquid, check that the User field "
+                        "contains your MASTER account address (not the agent/API wallet). "
+                        "Strategy stopped to prevent incorrect trades.");
+                }
+                zorroQuit("Zero balance and zero positions — possible wrong address");
+            }
+        }
     }
 
     // Zorro expects: Balance + TradeVal = Equity

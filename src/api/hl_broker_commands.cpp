@@ -496,7 +496,7 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
                 lotAmt = 1.0;
                 lev = 1;
             }
-            double pipCost = 0.000001;  // Constant for all HL assets
+            double pipCost = pip * lotAmt;  // 10^(-6) for perps, 10^(-8) for spot [OPM-141]
             double spread = (px.ask > 0 && px.bid > 0) ? (px.ask - px.bid) : 0.0;
 
             fprintf(f, "%s,%.8f,%.8f,0,0,%.8f,%.8f,0,%d,%.8f,-0.035\n",
@@ -541,7 +541,7 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
 
             double pip = pow(10.0, -asset->pxDecimals);
             double lotAmt = pow(10.0, -asset->szDecimals);
-            double pipCost = 0.000001;  // Constant for all HL assets
+            double pipCost = pip * lotAmt;  // 10^(-6) for perps, 10^(-8) for spot [OPM-141]
 
             fprintf(f, "%s,%.8f,%.8f,0,0,%.8f,%.8f,0,%d,%.8f,-0.035\n",
                     asset->coin, mid, spread, pip, pipCost, asset->maxLeverage, lotAmt);
