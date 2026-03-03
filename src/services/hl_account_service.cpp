@@ -211,12 +211,40 @@ double refreshSpotBalance() {
 // POSITION IMPLEMENTATION
 // =============================================================================
 
+// Rate-limited HTTP fallback for position data [OPM-134].
+// refreshBalance() calls parseClearinghouseState which populates both
+// balance AND positions in the PriceCache.
+static bool ensurePositionData() {
+    if (!g_priceCache) return false;
+
+    auto* cache = reinterpret_cast<hl::ws::PriceCache*>(g_priceCache);
+    DWORD posAge = cache->getPositionsAge();
+
+    // If we have a position snapshot (even if empty), no fallback needed
+    if (posAge != MAXDWORD) return true;
+
+    // No position snapshot received — rate-limited HTTP fallback
+    static DWORD lastAttempt = 0;
+    DWORD now = GetTickCount();
+    DWORD elapsed = (now >= lastAttempt) ? (now - lastAttempt) : MAXDWORD;
+    if (elapsed < config::POSITION_CACHE_MS) {
+        return false;  // Too soon since last HTTP attempt
+    }
+
+    logMsg(1, "ensurePositionData", "No WS position data, HTTP fallback");
+    lastAttempt = GetTickCount();
+    return refreshBalance();
+}
+
 PositionInfo getPosition(const char* coin) {
     PositionInfo result;
     if (!coin) return result;
 
-    // Try WebSocket cache first
-    if (g_config.enableWebSocket && g_priceCache) {
+    // Ensure we have position data (WS or HTTP fallback) [OPM-134]
+    ensurePositionData();
+
+    // Read from cache (works for both WS and HTTP-populated data)
+    if (g_priceCache) {
         auto* cache = reinterpret_cast<hl::ws::PriceCache*>(g_priceCache);
         ws::PositionData wsPos = cache->getPosition(std::string(coin));
 
@@ -241,7 +269,10 @@ PositionInfo getPosition(const char* coin) {
 std::vector<PositionInfo> getAllPositions() {
     std::vector<PositionInfo> positions;
 
-    if (!g_config.enableWebSocket || !g_priceCache) return positions;
+    // Ensure we have position data (WS or HTTP fallback) [OPM-134]
+    ensurePositionData();
+
+    if (!g_priceCache) return positions;
 
     auto* cache = reinterpret_cast<hl::ws::PriceCache*>(g_priceCache);
     std::vector<ws::PositionData> wsPositions = cache->getAllPositions();
