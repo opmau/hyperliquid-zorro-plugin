@@ -59,9 +59,9 @@ Return value is always `double`. Return 0 for failure, non-zero for success (unl
 
 | Code | Name | Parameter | Returns |
 |------|------|-----------|---------|
-| 50001 | `HL_EXPORT_ASSETS` | -- | (not implemented) |
-| 50002 | `HL_EXPORT_META` | -- | (not implemented) |
-| 50003 | `HL_EXPORT_ACCOUNT` | -- | (not implemented) |
+| 50001 | `HL_EXPORT_ASSETS` | file path string | 1 on success; writes CSV for BTC/ETH/SOL |
+| 50002 | `HL_EXPORT_META` | file path string | asset count; writes CSV for all assets |
+| 50003 | `HL_EXPORT_ACCOUNT` | file path string | 1 on success; writes Accounts.csv row |
 | 50010 | `HL_VALIDATE_PRICES` | 0 | 1 if BTC+ETH+SOL prices OK |
 | 50011 | `HL_ENABLE_WEBSOCKET` | 0/1 | 1 on success |
 | 50012 | `HL_SET_ORDER_TYPE` | "Ioc"/"Gtc"/"Alo" | 1 on success |
