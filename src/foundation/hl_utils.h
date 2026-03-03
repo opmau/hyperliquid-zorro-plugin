@@ -20,7 +20,9 @@ namespace utils {
 const char* skipWhitespace(const char* p);
 
 // Normalize Zorro symbol to Hyperliquid coin name
-// "BTC/USD" -> "BTC", "btc-usd" -> "BTC" (uppercase, strips suffix)
+// "BTC-USD" -> "BTC" (strips dash suffix, uppercase)
+// "HYPE/USDC" -> "HYPE/USDC" (preserves slash for spot)
+// "@107" -> "@107" (preserves @-format for spot)
 void normalizeCoin(const char* symbol, char* out, size_t outSize);
 
 // Parse perpDex venue from display name (underscore-suffix format) [OPM-169]
