@@ -185,6 +185,7 @@ void notifyFill(const char* cloid, double filledSize, double avgPrice, const cha
     if (status) {
         if (strcmp(status, "filled") == 0) orderStatus = OrderStatus::Filled;
         else if (strcmp(status, "canceled") == 0 || strcmp(status, "cancelled") == 0) orderStatus = OrderStatus::Cancelled;
+        else if (strcmp(status, "siblingFilledCanceled") == 0) orderStatus = OrderStatus::Cancelled;  // [OPM-79]
         else if (strcmp(status, "partial") == 0) orderStatus = OrderStatus::PartialFill;
         else if (strcmp(status, "error") == 0) orderStatus = OrderStatus::Error;
     }
