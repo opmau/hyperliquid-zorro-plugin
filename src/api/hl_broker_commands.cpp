@@ -12,7 +12,7 @@
 // - SET_DIAGNOSTICS, SET_AMOUNT, SET_HWND
 // - GET_POSITION, GET_TRADES, GET_PRICE
 // - DO_CANCEL
-// - Custom commands (50010-50021)
+// - Custom commands (50010-50031)
 //=============================================================================
 
 #include "hl_broker_internal.h"
@@ -426,6 +426,19 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
             hl::g_logger.log(1, msg);
         }
         return ok ? 1 : 0;
+    }
+
+    case HL_GET_FUNDING_RATE: {
+        // Return current hourly funding rate for a coin [OPM-172]
+        // Parameter: string coin name, or 0 to use current symbol
+        const char* coin = nullptr;
+        if (parameter != 0) {
+            coin = (const char*)parameter;
+        } else {
+            coin = hl::g_trading.currentSymbol;
+        }
+        if (!coin || !*coin) return 0.0;
+        return hl::market::getFundingRate(coin);
     }
 
     case HL_FORCE_WS_DISCONNECT: {
