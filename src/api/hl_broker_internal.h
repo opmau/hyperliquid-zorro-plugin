@@ -86,6 +86,7 @@
 #define HL_SCHEDULE_CANCEL     50032  // Dead man's switch: param=seconds from now, 0=clear [OPM-83]
 #define HL_PLACE_TWAP          50040  // Place TWAP order: param=TwapRequest* [OPM-81]
 #define HL_CANCEL_TWAP         50041  // Cancel TWAP order: param=twapId [OPM-81]
+#define HL_MODIFY_ORDER        50042  // Atomic order modify: param=ModifyRequest* [OPM-80]
 
 // Zorro runtime function pointer (defined in hl_broker.cpp, used by BrokerAccount)
 extern "C" { extern int (*nap)(int); }
