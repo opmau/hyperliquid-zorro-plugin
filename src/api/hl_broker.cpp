@@ -320,6 +320,12 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
                 BrokerMessage("WARNING: Address not found on Hyperliquid. "
                     "Check that the address is correct.");
             }
+        } else if (role == hl::account::UserRole::Unknown) {
+            // [OPM-136] checkUserRole HTTP call failed — warn so it's visible
+            if (BrokerMessage) {
+                BrokerMessage("WARNING: Could not verify account role (network error). "
+                    "If balance shows 0, verify the User field address.");
+            }
         } else if (addressesDiffer && role == hl::account::UserRole::User) {
             hl::g_logger.logf(1, "BrokerLogin: Using agent key (signer=%s) for "
                 "master account %s", derivedAddr, hl::g_config.walletAddress);
