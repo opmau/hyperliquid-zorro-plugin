@@ -136,5 +136,28 @@ ByteArray packTwapCancelAction(int asset, uint64_t twapId);
 /// @param time  Cancel time in UTC milliseconds (0 = clear/unschedule)
 ByteArray packScheduleCancelAction(uint64_t time);
 
+/// Describes one order in a bracket group (entry, TP, or SL) [OPM-79]
+struct BracketOrderWire {
+    int asset;
+    bool isBuy;
+    std::string price;      // Formatted limit/slippage price
+    std::string size;       // Formatted size
+    bool reduceOnly;
+    std::string tif;        // "Ioc","Gtc","Alo" — ignored for triggers
+    std::string cloid;
+    bool isTrigger;
+    bool triggerIsMarket;
+    std::string triggerPx;  // Formatted trigger price
+    std::string tpsl;       // "tp" or "sl"
+};
+
+/// Pack a bracket (grouped) order action for signing. [OPM-79]
+/// Encodes multiple orders in a single action with normalTpsl grouping.
+/// {"type":"order","orders":[{entry},{tp},{sl}],"grouping":"normalTpsl"}
+ByteArray packBracketOrderAction(
+    const std::vector<BracketOrderWire>& orders,
+    const std::string& grouping = "normalTpsl"
+);
+
 } // namespace msgpack
 } // namespace hl
