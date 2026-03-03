@@ -18,6 +18,7 @@
 
 #include "hl_broker_internal.h"
 #include "../services/hl_trading_twap.h"
+#include "../services/hl_trading_modify.h"
 
 //=============================================================================
 // HANDLER IMPLEMENTATION
@@ -619,6 +620,21 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         if (!coin || !*coin) return 0;
         bool ok = hl::trading::cancelTwapOrder(coin, twapId);
         return ok ? 1 : 0;
+    }
+
+    //=========================================================================
+    // MODIFY ORDER (50042) [OPM-80]
+    //=========================================================================
+
+    case HL_MODIFY_ORDER: {
+        if (parameter == 0) return 0;
+        const hl::ModifyRequest* req = (const hl::ModifyRequest*)parameter;
+        hl::ModifyResult res = hl::trading::modifyOrder(*req);
+        if (!res.success) {
+            hl::g_logger.logf(1, "HL_MODIFY_ORDER failed: %s", res.error.c_str());
+            return 0;
+        }
+        return 1;
     }
 
     default:
