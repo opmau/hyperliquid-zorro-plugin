@@ -377,8 +377,7 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
             double avgPx = totalValue / totalFilled;
 
             if (totalFilled >= state.filledSize) {
-                hl::OrderStatus newSt = (totalFilled >= state.requestedSize * 0.999)
-                    ? hl::OrderStatus::Filled : hl::OrderStatus::PartialFill;
+                hl::OrderStatus newSt = hl::determineFilledStatus(totalFilled, state.requestedSize);
                 hl::trading::updateOrder(tradeId, totalFilled, avgPx, newSt);
                 state.filledSize = totalFilled;
                 state.avgPrice = avgPx;
