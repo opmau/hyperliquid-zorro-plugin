@@ -17,6 +17,7 @@
 //=============================================================================
 
 #include "hl_broker_internal.h"
+#include "../services/hl_trading_twap.h"
 
 //=============================================================================
 // HANDLER IMPLEMENTATION
@@ -465,6 +466,17 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         return 1;
     }
 
+    case HL_SCHEDULE_CANCEL: {
+        // Dead man's switch [OPM-83]
+        // param = seconds from now (0 = clear). Plugin converts to absolute ms.
+        int seconds = (int)parameter;
+        if (seconds > 0) {
+            uint64_t timeMs = ((uint64_t)time(nullptr) + (uint64_t)seconds) * 1000;
+            return hl::trading::scheduleCancel(timeMs) ? 1 : 0;
+        }
+        return hl::trading::clearScheduleCancel() ? 1 : 0;
+    }
+
     //=========================================================================
     // EXPORT COMMANDS (50001-50003) [OPM-13]
     //=========================================================================
@@ -583,6 +595,30 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         if (hl::g_config.diagLevel >= 1)
             hl::g_logger.logf(1, "HL_EXPORT_ACCOUNT: Wrote %s", path);
         return 1;
+    }
+
+    //=========================================================================
+    // TWAP COMMANDS (50040-50041) [OPM-81]
+    //=========================================================================
+
+    case HL_PLACE_TWAP: {
+        if (parameter == 0) return 0;
+        const hl::TwapRequest* req = (const hl::TwapRequest*)parameter;
+        hl::TwapResult res = hl::trading::placeTwapOrder(*req);
+        if (!res.success) {
+            hl::g_logger.logf(1, "HL_PLACE_TWAP failed: %s", res.error.c_str());
+            return 0;
+        }
+        return (double)res.twapId;
+    }
+
+    case HL_CANCEL_TWAP: {
+        uint64_t twapId = (uint64_t)parameter;
+        if (twapId == 0) return 0;
+        const char* coin = hl::g_trading.currentSymbol;
+        if (!coin || !*coin) return 0;
+        bool ok = hl::trading::cancelTwapOrder(coin, twapId);
+        return ok ? 1 : 0;
     }
 
     default:
