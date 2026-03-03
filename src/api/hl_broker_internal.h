@@ -81,6 +81,7 @@
 #define HL_EXPORT_ASSETS    50001
 #define HL_EXPORT_META      50002
 #define HL_EXPORT_ACCOUNT   50003
+#define HL_GET_FUNDING_RATE     50031  // Query current hourly funding rate for a coin [OPM-172]
 #define HL_FORCE_WS_DISCONNECT 50030  // Debug: force WS disconnect to test reconnect [OPM-170]
 
 // Zorro runtime function pointer (defined in hl_broker.cpp, used by BrokerAccount)
