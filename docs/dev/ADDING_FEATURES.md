@@ -69,6 +69,11 @@ Return value is always `double`. Return 0 for failure, non-zero for success (unl
 | 50021 | `HL_SET_ACCOUNT_MODE` | 0=API/1=vault | 1 on success |
 | 50030 | `HL_FORCE_WS_DISCONNECT` | 0 | 1 on success (debug only) |
 | 50031 | `HL_GET_FUNDING_RATE` | coin string or 0 | hourly funding rate (double) |
+| 50032 | `HL_SCHEDULE_CANCEL` | seconds (0=clear) | 1/0; dead man's switch |
+| 50040 | `HL_PLACE_TWAP` | `TwapRequest*` | twapId (double) on success |
+| 50041 | `HL_CANCEL_TWAP` | twapId (uint64) | 1/0 |
+| 50042 | `HL_MODIFY_ORDER` | `ModifyRequest*` | 1/0; atomic order modify |
+| 50043 | `HL_PLACE_BRACKET` | `BracketRequest*` | entryTradeId; bracket order |
 
 ---
 
@@ -204,7 +209,8 @@ When adding code, keep files within these limits:
 | Hard ceiling | 1000 lines |
 
 If a file would exceed 600 lines, split it. Examples from the codebase:
-- `hl_trading_service.cpp` (orders) + `hl_trading_cancel.cpp` (cancellations)
+- `hl_trading_service.cpp` (orders) + `hl_trading_cancel.cpp` (cancellations + scheduleCancel)
+- `hl_trading_twap.cpp` (TWAP) + `hl_trading_modify.cpp` (batchModify) + `hl_trading_bracket.cpp` (bracket orders)
 - `hl_meta.cpp` (perps) + `hl_meta_spot.cpp` (spot)
 - `hl_broker.cpp` (lifecycle) + `hl_broker_market.cpp` (data) + `hl_broker_trade.cpp` (orders) + `hl_broker_commands.cpp` (commands)
 
