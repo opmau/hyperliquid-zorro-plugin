@@ -99,8 +99,12 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
             strcpy_s(hl::g_config.orderType, "Gtc");
             hl::trading::setOrderType("Gtc");
             break;
+        case 4:  // Broker-specific → ALO (Post-Only / Add-Liquidity-Only)
+            strcpy_s(hl::g_config.orderType, "Alo");
+            hl::trading::setOrderType("Alo");
+            break;
         default:
-            return 0;  // AON (1), AON+GTC (3), broker-specific (4) not supported
+            return 0;  // AON (1), AON+GTC (3) not supported
         }
         if (hl::g_config.diagLevel >= 1) {
             hl::g_logger.logf(1, "SET_ORDERTYPE: %d -> %s%s",
@@ -220,6 +224,16 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
                 char msg[64];
                 sprintf_s(msg, "Rebuilt %d positions", posCount);
                 hl::g_logger.log(1, msg);
+            }
+
+            // [OPM-136] Warn when no positions found during rebuild
+            if (posCount == 0 && hl::g_logger.callback) {
+                hl::account::Balance bal = hl::account::getBalance();
+                if (bal.dataReceived && bal.accountValue <= 0) {
+                    hl::g_logger.callback(
+                        "WARNING: No positions found and balance is zero. "
+                        "Verify the User field contains your MASTER account address.");
+                }
             }
             return 1;
         }
