@@ -313,6 +313,36 @@ if !ERRORLEVEL! EQU 0 (
 echo.
 
 REM =============================================================================
+REM Test 20: Account Service WS Cache Tests [OPM-175]
+REM Tests: getBalance, hasRealtimeBalance, getPosition with PriceCache
+REM =============================================================================
+echo [20/21] Testing account service WS cache interactions...
+call compile_account_service_ws_test.bat
+if !ERRORLEVEL! EQU 0 (
+    set /a TESTS_PASSED+=1
+    echo       PASSED
+) else (
+    set /a TESTS_FAILED+=1
+    echo       FAILED - Account service WS cache tests failed!
+)
+echo.
+
+REM =============================================================================
+REM Test 21: Market Service WS Cache Tests [OPM-175]
+REM Tests: getPrice WS reads, stale-data fallback, HTTP seed cooldown
+REM =============================================================================
+echo [21/21] Testing market service WS cache interactions...
+call compile_market_service_ws_test.bat
+if !ERRORLEVEL! EQU 0 (
+    set /a TESTS_PASSED+=1
+    echo       PASSED
+) else (
+    set /a TESTS_FAILED+=1
+    echo       FAILED - Market service WS cache tests failed!
+)
+echo.
+
+REM =============================================================================
 REM SUMMARY
 REM =============================================================================
 echo =====================================================
