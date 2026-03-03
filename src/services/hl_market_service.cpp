@@ -336,6 +336,13 @@ PriceData getPerpDexPrice(const char* perpDex, const char* coin, uint32_t maxAge
         result.ask = httpAsk;
         result.mid = (httpBid + httpAsk) / 2.0;
         result.timestamp = GetTickCount();
+
+        // Seed WS cache from HTTP fallback [OPM-142]
+        if (g_priceCache) {
+            auto* cache = reinterpret_cast<hl::ws::PriceCache*>(g_priceCache);
+            cache->setBidAsk(std::string(apiCoin), httpBid, httpAsk);
+        }
+
         recordSeed(apiCoin);
     } else if (httpBid > 0.0) {
         // Fallback: only bid available (thin order book)
