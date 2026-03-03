@@ -365,5 +365,119 @@ int cancelAllOrders(const char* coin) {
     return 0;
 }
 
+// =============================================================================
+// DEAD MAN'S SWITCH (scheduleCancel) [OPM-83]
+// =============================================================================
+
+/// Internal helper: submit scheduleCancel action to the exchange.
+/// @param timeMs  Absolute UTC time in ms (0 = clear scheduled cancel)
+static bool submitScheduleCancel(uint64_t timeMs) {
+    // Hash with EIP-712 for signing
+    uint64_t nonce = generateNonce();
+    bool isMainnet = !g_config.isTestnet;
+    eip712::ByteArray msgHash = eip712::hashScheduleCancelForSigning(
+        timeMs, isMainnet, nonce, "");
+
+    if (msgHash.empty() || msgHash.size() != 32) {
+        logMsg(1, "scheduleCancel", "Failed to generate EIP-712 message hash");
+        return false;
+    }
+
+    // Sign the hash
+    crypto::Signature sig;
+    if (!crypto::signHash(msgHash.data(), g_config.privateKey, sig)) {
+        logMsg(1, "scheduleCancel", "Failed to sign scheduleCancel action");
+        return false;
+    }
+
+    // Build signed JSON payload
+    char json[512];
+    if (timeMs > 0) {
+        sprintf_s(json, sizeof(json),
+            "{"
+                "\"action\":{\"type\":\"scheduleCancel\",\"time\":%llu},"
+                "\"nonce\":%llu,"
+                "\"signature\":%s,"
+                "\"vaultAddress\":null,"
+                "\"expiresAfter\":null"
+            "}",
+            (unsigned long long)timeMs,
+            (unsigned long long)nonce,
+            sig.toJson().c_str()
+        );
+    } else {
+        sprintf_s(json, sizeof(json),
+            "{"
+                "\"action\":{\"type\":\"scheduleCancel\"},"
+                "\"nonce\":%llu,"
+                "\"signature\":%s,"
+                "\"vaultAddress\":null,"
+                "\"expiresAfter\":null"
+            "}",
+            (unsigned long long)nonce,
+            sig.toJson().c_str()
+        );
+    }
+
+    if (g_config.diagLevel >= 2) {
+        char msg[256];
+        sprintf_s(msg, "scheduleCancel JSON (first 200): %.200s", json);
+        logMsg(2, "scheduleCancel", msg);
+    }
+
+    // Submit to exchange
+    http::Response resp = http::exchangePost(json);
+    if (!resp.success()) {
+        logMsg(1, "scheduleCancel", "HTTP request failed");
+        return false;
+    }
+
+    // Check response for errors
+    if (!resp.body.empty()) {
+        yyjson_doc* doc = yyjson_read(resp.body.c_str(), resp.body.size(), 0);
+        if (doc) {
+            yyjson_val* root = yyjson_doc_get_root(doc);
+            const char* st = json::getStringPtr(root, "status");
+            if (st && strncmp(st, "err", 3) == 0) {
+                char errMsg[512];
+                yyjson_val* respVal = yyjson_obj_get(root, "response");
+                if (respVal && yyjson_is_str(respVal)) {
+                    sprintf_s(errMsg, "Exchange error: %s", yyjson_get_str(respVal));
+                } else {
+                    sprintf_s(errMsg, "Exchange rejected scheduleCancel");
+                }
+                logMsg(1, "scheduleCancel", errMsg);
+                yyjson_doc_free(doc);
+                return false;
+            }
+            yyjson_doc_free(doc);
+        }
+    }
+
+    if (g_config.diagLevel >= 1) {
+        char msg[128];
+        if (timeMs > 0) {
+            sprintf_s(msg, "scheduleCancel set: time=%llu ms", (unsigned long long)timeMs);
+        } else {
+            sprintf_s(msg, "scheduleCancel cleared");
+        }
+        logMsg(1, "scheduleCancel", msg);
+    }
+
+    return true;
+}
+
+bool scheduleCancel(uint64_t timeMs) {
+    if (timeMs == 0) {
+        logMsg(1, "scheduleCancel", "timeMs is 0 — use clearScheduleCancel() instead");
+        return false;
+    }
+    return submitScheduleCancel(timeMs);
+}
+
+bool clearScheduleCancel() {
+    return submitScheduleCancel(0);
+}
+
 } // namespace trading
 } // namespace hl

@@ -267,6 +267,111 @@ ByteArray packTriggerOrderAction(
     return packer.data();
 }
 
+// --- Shared OrderWire packing helper [OPM-80] ---
+
+void packOrderWire(
+    Packer& packer,
+    int asset,
+    bool isBuy,
+    const std::string& price,
+    const std::string& size,
+    bool reduceOnly,
+    const std::string& tif,
+    const std::string& cloid,
+    bool isTrigger,
+    bool triggerIsMarket,
+    const std::string& triggerPx,
+    const std::string& tpsl
+) {
+    // Field order: a, b, p, s, r, t, [c]
+    // Matches Python SDK order_request_to_order_wire() in signing.py:504-515
+    int mapSize = cloid.empty() ? 6 : 7;
+    packer.packMapHeader(mapSize);
+
+    packer.packString("a");
+    packer.packInt(asset);
+
+    packer.packString("b");
+    packer.packBool(isBuy);
+
+    packer.packString("p");
+    packer.packString(price);
+
+    packer.packString("s");
+    packer.packString(size);
+
+    packer.packString("r");
+    packer.packBool(reduceOnly);
+
+    packer.packString("t");
+    if (isTrigger) {
+        packer.packMapHeader(1);
+        packer.packString("trigger");
+        packer.packMapHeader(3);
+        packer.packString("isMarket");
+        packer.packBool(triggerIsMarket);
+        packer.packString("triggerPx");
+        packer.packString(triggerPx);
+        packer.packString("tpsl");
+        packer.packString(tpsl);
+    } else {
+        packer.packMapHeader(1);
+        packer.packString("limit");
+        packer.packMapHeader(1);
+        packer.packString("tif");
+        packer.packString(tif);
+    }
+
+    if (!cloid.empty()) {
+        packer.packString("c");
+        packer.packString(cloid);
+    }
+}
+
+// --- batchModify encoding [OPM-80] ---
+
+ByteArray packBatchModifyAction(
+    uint64_t oidNumeric,
+    const std::string& oidCloid,
+    bool oidIsCloid,
+    int asset,
+    bool isBuy,
+    const std::string& price,
+    const std::string& size,
+    bool reduceOnly,
+    const std::string& tif,
+    const std::string& cloid
+) {
+    Packer packer;
+
+    // Outer map: 2 keys ("type", "modifies")
+    // Field order verified against Python SDK bulk_modify_orders_new()
+    // refs/hyperliquid-python-sdk/hyperliquid/exchange.py:205-208
+    packer.packMapHeader(2);
+
+    packer.packString("type");
+    packer.packString("batchModify");
+
+    packer.packString("modifies");
+    packer.packArrayHeader(1);
+
+    // Each modify element: Map(2) with "oid" then "order"
+    // From Python SDK exchange.py:198-201
+    packer.packMapHeader(2);
+
+    packer.packString("oid");
+    if (oidIsCloid) {
+        packer.packString(oidCloid);
+    } else {
+        packer.packInt(static_cast<int64_t>(oidNumeric));
+    }
+
+    packer.packString("order");
+    packOrderWire(packer, asset, isBuy, price, size, reduceOnly, tif, cloid);
+
+    return packer.data();
+}
+
 ByteArray packCancelAction(int asset, uint64_t orderId) {
     Packer packer;
 
@@ -287,6 +392,94 @@ ByteArray packCancelAction(int asset, uint64_t orderId) {
     packer.packInt(asset);
     packer.packString("o");
     packer.packInt(static_cast<int64_t>(orderId));
+
+    return packer.data();
+}
+
+// --- TWAP order encoding [OPM-81] ---
+
+ByteArray packTwapOrderAction(
+    int asset,
+    bool isBuy,
+    const std::string& size,
+    bool reduceOnly,
+    int minutes,
+    bool randomize
+) {
+    Packer packer;
+
+    // Outer map: 2 keys ("type", "twap")
+    // Field order verified against Chainstack TWAP guide
+    packer.packMapHeader(2);
+
+    // 1. "type": "twapOrder"
+    packer.packString("type");
+    packer.packString("twapOrder");
+
+    // 2. "twap": {inner map with 6 keys}
+    packer.packString("twap");
+    packer.packMapHeader(6);
+
+    packer.packString("a");
+    packer.packInt(asset);
+
+    packer.packString("b");
+    packer.packBool(isBuy);
+
+    packer.packString("s");
+    packer.packString(size);
+
+    packer.packString("r");
+    packer.packBool(reduceOnly);
+
+    packer.packString("m");
+    packer.packInt(minutes);
+
+    packer.packString("t");
+    packer.packBool(randomize);
+
+    return packer.data();
+}
+
+ByteArray packTwapCancelAction(int asset, uint64_t twapId) {
+    Packer packer;
+
+    // Outer map: 3 keys ("type", "a", "t")
+    // Field order verified against Chainstack TWAP guide + HL API docs
+    packer.packMapHeader(3);
+
+    // 1. "type": "twapCancel"
+    packer.packString("type");
+    packer.packString("twapCancel");
+
+    // 2. "a": asset index
+    packer.packString("a");
+    packer.packInt(asset);
+
+    // 3. "t": twapId
+    packer.packString("t");
+    packer.packInt(static_cast<int64_t>(twapId));
+
+    return packer.data();
+}
+
+// --- scheduleCancel encoding [OPM-83] ---
+
+ByteArray packScheduleCancelAction(uint64_t time) {
+    Packer packer;
+
+    // Without time: {"type":"scheduleCancel"}  (1 key)
+    // With time:    {"type":"scheduleCancel","time":N}  (2 keys)
+    // Field order: "type" first, "time" second (matches Python SDK)
+    packer.packMapHeader(time > 0 ? 2 : 1);
+
+    packer.packString("type");
+    packer.packString("scheduleCancel");
+
+    if (time > 0) {
+        packer.packString("time");
+        packer.packInt(static_cast<int64_t>(time));
+    }
 
     return packer.data();
 }

@@ -83,6 +83,9 @@
 #define HL_EXPORT_ACCOUNT   50003
 #define HL_GET_FUNDING_RATE     50031  // Query current hourly funding rate for a coin [OPM-172]
 #define HL_FORCE_WS_DISCONNECT 50030  // Debug: force WS disconnect to test reconnect [OPM-170]
+#define HL_SCHEDULE_CANCEL     50032  // Dead man's switch: param=seconds from now, 0=clear [OPM-83]
+#define HL_PLACE_TWAP          50040  // Place TWAP order: param=TwapRequest* [OPM-81]
+#define HL_CANCEL_TWAP         50041  // Cancel TWAP order: param=twapId [OPM-81]
 
 // Zorro runtime function pointer (defined in hl_broker.cpp, used by BrokerAccount)
 extern "C" { extern int (*nap)(int); }

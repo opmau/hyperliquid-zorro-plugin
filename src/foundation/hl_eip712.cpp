@@ -367,5 +367,184 @@ ByteArray hashCancelForSigning(const CancelAction& action, bool isMainnet,
     return generateMessageHash(domainSep, structHash);
 }
 
+// =============================================================================
+// batchModify Actions [OPM-80]
+// Generic: takes pre-packed msgpack bytes, appends nonce + vault, keccak256
+// =============================================================================
+
+ByteArray hashBatchModifyAction(const ByteArray& packedAction, uint64_t nonce,
+                                const std::string& vaultAddress) {
+    ByteArray actionData(packedAction);
+
+    // Append nonce (8 bytes, big-endian)
+    for (int i = 7; i >= 0; --i) {
+        actionData.push_back((nonce >> (i * 8)) & 0xFF);
+    }
+
+    // Append vault address flag and bytes (matches Python SDK action_hash)
+    if (vaultAddress.empty() ||
+        vaultAddress == "0x0000000000000000000000000000000000000000") {
+        actionData.push_back(0x00);
+    } else {
+        actionData.push_back(0x01);
+        ByteArray vaultBytes = hexToBytes(vaultAddress);
+        if (vaultBytes.size() == 20) {
+            actionData.insert(actionData.end(), vaultBytes.begin(), vaultBytes.end());
+        }
+    }
+
+    return keccak(actionData);
+}
+
+ByteArray hashBatchModifyForSigning(const ByteArray& packedAction, bool isMainnet,
+                                    uint64_t nonce,
+                                    const std::string& vaultAddress) {
+    if (nonce == 0) {
+        nonce = getCurrentTimestampMs();
+    }
+
+    HyperliquidDomain domain;
+    ByteArray domainSep = encodeDomainSeparator(domain);
+    ByteArray connectionId = hashBatchModifyAction(packedAction, nonce, vaultAddress);
+
+    std::string source = isMainnet ? "a" : "b";
+    ByteArray structHash = encodeAgentType(source, connectionId);
+
+    return generateMessageHash(domainSep, structHash);
+}
+
+// =============================================================================
+// TWAP Actions [OPM-81]
+// Same signing flow as regular orders: msgpack → nonce → vault → keccak256
+// =============================================================================
+
+ByteArray hashTwapOrderAction(const TwapOrderAction& action, uint64_t nonce,
+                              const std::string& vaultAddress) {
+    ByteArray actionData = msgpack::packTwapOrderAction(
+        action.asset, action.isBuy, action.size,
+        action.reduceOnly, action.minutes, action.randomize);
+
+    // Append nonce (8 bytes, big-endian)
+    for (int i = 7; i >= 0; --i) {
+        actionData.push_back((nonce >> (i * 8)) & 0xFF);
+    }
+
+    // Append vault address flag and bytes (matches Python SDK)
+    if (vaultAddress.empty() ||
+        vaultAddress == "0x0000000000000000000000000000000000000000") {
+        actionData.push_back(0x00);
+    } else {
+        actionData.push_back(0x01);
+        ByteArray vaultBytes = hexToBytes(vaultAddress);
+        if (vaultBytes.size() == 20) {
+            actionData.insert(actionData.end(), vaultBytes.begin(), vaultBytes.end());
+        }
+    }
+
+    return keccak(actionData);
+}
+
+ByteArray hashTwapCancelAction(const TwapCancelAction& action, uint64_t nonce,
+                               const std::string& vaultAddress) {
+    ByteArray actionData = msgpack::packTwapCancelAction(action.asset, action.twapId);
+
+    for (int i = 7; i >= 0; --i) {
+        actionData.push_back((nonce >> (i * 8)) & 0xFF);
+    }
+
+    if (vaultAddress.empty() ||
+        vaultAddress == "0x0000000000000000000000000000000000000000") {
+        actionData.push_back(0x00);
+    } else {
+        actionData.push_back(0x01);
+        ByteArray vaultBytes = hexToBytes(vaultAddress);
+        if (vaultBytes.size() == 20) {
+            actionData.insert(actionData.end(), vaultBytes.begin(), vaultBytes.end());
+        }
+    }
+
+    return keccak(actionData);
+}
+
+ByteArray hashTwapOrderForSigning(const TwapOrderAction& action, bool isMainnet,
+                                  uint64_t nonce,
+                                  const std::string& vaultAddress) {
+    if (nonce == 0) {
+        nonce = getCurrentTimestampMs();
+    }
+
+    HyperliquidDomain domain;
+    ByteArray domainSep = encodeDomainSeparator(domain);
+    ByteArray connectionId = hashTwapOrderAction(action, nonce, vaultAddress);
+
+    std::string source = isMainnet ? "a" : "b";
+    ByteArray structHash = encodeAgentType(source, connectionId);
+
+    return generateMessageHash(domainSep, structHash);
+}
+
+ByteArray hashTwapCancelForSigning(const TwapCancelAction& action, bool isMainnet,
+                                   uint64_t nonce,
+                                   const std::string& vaultAddress) {
+    if (nonce == 0) {
+        nonce = getCurrentTimestampMs();
+    }
+
+    HyperliquidDomain domain;
+    ByteArray domainSep = encodeDomainSeparator(domain);
+    ByteArray connectionId = hashTwapCancelAction(action, nonce, vaultAddress);
+
+    std::string source = isMainnet ? "a" : "b";
+    ByteArray structHash = encodeAgentType(source, connectionId);
+
+    return generateMessageHash(domainSep, structHash);
+}
+
+// =============================================================================
+// scheduleCancel Actions [OPM-83]
+// Same signing flow: msgpack → nonce → vault → keccak256
+// =============================================================================
+
+ByteArray hashScheduleCancelAction(uint64_t time, uint64_t nonce,
+                                   const std::string& vaultAddress) {
+    ByteArray actionData = msgpack::packScheduleCancelAction(time);
+
+    // Append nonce (8 bytes, big-endian)
+    for (int i = 7; i >= 0; --i) {
+        actionData.push_back((nonce >> (i * 8)) & 0xFF);
+    }
+
+    // Append vault address flag
+    if (vaultAddress.empty() ||
+        vaultAddress == "0x0000000000000000000000000000000000000000") {
+        actionData.push_back(0x00);
+    } else {
+        actionData.push_back(0x01);
+        ByteArray vaultBytes = hexToBytes(vaultAddress);
+        if (vaultBytes.size() == 20) {
+            actionData.insert(actionData.end(), vaultBytes.begin(), vaultBytes.end());
+        }
+    }
+
+    return keccak(actionData);
+}
+
+ByteArray hashScheduleCancelForSigning(uint64_t time, bool isMainnet,
+                                       uint64_t nonce,
+                                       const std::string& vaultAddress) {
+    if (nonce == 0) {
+        nonce = getCurrentTimestampMs();
+    }
+
+    HyperliquidDomain domain;
+    ByteArray domainSep = encodeDomainSeparator(domain);
+    ByteArray connectionId = hashScheduleCancelAction(time, nonce, vaultAddress);
+
+    std::string source = isMainnet ? "a" : "b";
+    ByteArray structHash = encodeAgentType(source, connectionId);
+
+    return generateMessageHash(domainSep, structHash);
+}
+
 } // namespace eip712
 } // namespace hl
