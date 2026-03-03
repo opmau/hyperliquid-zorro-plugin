@@ -12,6 +12,7 @@
 // - SET_DIAGNOSTICS, SET_AMOUNT, SET_HWND
 // - GET_POSITION, GET_TRADES, GET_PRICE
 // - DO_CANCEL
+// - Export commands (50001-50003)
 // - Custom commands (50010-50031)
 //=============================================================================
 
@@ -447,6 +448,126 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         auto* wsMgr = static_cast<hl::ws::WebSocketManager*>(hl::g_wsManager);
         hl::g_logger.log(1, "DEBUG: Forcing WS disconnect (OPM-170 test)");
         wsMgr->forceDisconnectForTest();
+        return 1;
+    }
+
+    //=========================================================================
+    // EXPORT COMMANDS (50001-50003) [OPM-13]
+    //=========================================================================
+
+    case HL_EXPORT_ASSETS: {
+        // Export basic asset CSV for top coins (BTC, ETH, SOL)
+        const char* path = (const char*)parameter;
+        if (!path || !*path) return 0;
+
+        FILE* f = nullptr;
+        if (0 != fopen_s(&f, path, "w") || !f) return 0;
+
+        fprintf(f, "Name,Price,Spread,RollLong,RollShort,PIP,PIPCost,MarginCost,Leverage,LotAmount,Commission\n");
+
+        const char* coins[] = {"BTC", "ETH", "SOL"};
+        for (int i = 0; i < 3; i++) {
+            hl::PriceData px = hl::market::getPrice(coins[i]);
+            if (px.mid <= 0) continue;
+
+            const hl::AssetInfo* asset = hl::market::getAsset(coins[i]);
+            double pip, lotAmt;
+            int lev;
+            if (asset) {
+                pip = pow(10.0, -asset->pxDecimals);
+                lotAmt = pow(10.0, -asset->szDecimals);
+                lev = asset->maxLeverage;
+            } else {
+                pip = (px.mid >= 1000.0) ? 0.5 : 0.01;
+                lotAmt = 1.0;
+                lev = 1;
+            }
+            double pipCost = 0.000001;  // Constant for all HL assets
+            double spread = (px.ask > 0 && px.bid > 0) ? (px.ask - px.bid) : 0.0;
+
+            fprintf(f, "%s,%.8f,%.8f,0,0,%.8f,%.8f,0,%d,%.8f,-0.035\n",
+                    coins[i], px.mid, spread, pip, pipCost, lev, lotAmt);
+        }
+
+        fclose(f);
+        if (hl::g_config.diagLevel >= 1)
+            hl::g_logger.logf(1, "HL_EXPORT_ASSETS: Wrote %s", path);
+        return 1;
+    }
+
+    case HL_EXPORT_META: {
+        // Export all assets from registry into Zorro Assets CSV
+        const char* path = (const char*)parameter;
+        if (!path || !*path) return 0;
+        if (hl::g_assets.count <= 0) return 0;
+
+        FILE* f = nullptr;
+        if (0 != fopen_s(&f, path, "w") || !f) return 0;
+
+        fprintf(f, "Name,Price,Spread,RollLong,RollShort,PIP,PIPCost,MarginCost,Leverage,LotAmount,Commission\n");
+
+        // Use PriceCache for fast bulk lookups (no HTTP fallback)
+        hl::ws::PriceCache* cache = hl::g_priceCache
+            ? static_cast<hl::ws::PriceCache*>(hl::g_priceCache) : nullptr;
+
+        int written = 0;
+        for (int i = 0; i < hl::g_assets.count; i++) {
+            const hl::AssetInfo* asset = hl::g_assets.getByIndex(i);
+            if (!asset || !asset->coin[0]) continue;
+
+            double mid = 0.0, spread = 0.0;
+            if (cache) {
+                double bid = cache->getBid(asset->coin);
+                double ask = cache->getAsk(asset->coin);
+                if (bid > 0 && ask > 0) {
+                    mid = (bid + ask) / 2.0;
+                    spread = ask - bid;
+                }
+            }
+
+            double pip = pow(10.0, -asset->pxDecimals);
+            double lotAmt = pow(10.0, -asset->szDecimals);
+            double pipCost = 0.000001;  // Constant for all HL assets
+
+            fprintf(f, "%s,%.8f,%.8f,0,0,%.8f,%.8f,0,%d,%.8f,-0.035\n",
+                    asset->coin, mid, spread, pip, pipCost, asset->maxLeverage, lotAmt);
+            written++;
+        }
+
+        fclose(f);
+        if (hl::g_config.diagLevel >= 1)
+            hl::g_logger.logf(1, "HL_EXPORT_META: Wrote %d assets to %s", written, path);
+        return written;
+    }
+
+    case HL_EXPORT_ACCOUNT: {
+        // Export Accounts.csv row with current connection info
+        const char* path = (const char*)parameter;
+        if (!path || !*path) return 0;
+
+        FILE* f = nullptr;
+        if (0 != fopen_s(&f, path, "w") || !f) return 0;
+
+        const char* dllName =
+#ifdef DEV_BUILD
+            "Hyperliquid_Dev.dll";
+#else
+            "Hyperliquid.dll";
+#endif
+
+        fprintf(f, "Name,Server,AccountId,User,Pass,Assets,CCY,Real,NFA,Plugin\n");
+        fprintf(f, "%s,%s,%s,%s,%s,AssetsHyperliquid,USD,%d,0,%s\n",
+                PLUGIN_NAME,
+                hl::g_config.baseUrl[0] ? hl::g_config.baseUrl : "https://api.hyperliquid.xyz",
+                hl::g_config.walletAddress[0] ? hl::g_config.walletAddress : "0",
+                hl::g_config.walletAddress[0] ? hl::g_config.walletAddress : "0",
+                hl::g_config.privateKey[0] ? hl::g_config.privateKey : "0",
+                hl::g_config.isTestnet ? 0 : 1,
+                dllName);
+
+        fclose(f);
+        if (hl::g_config.diagLevel >= 1)
+            hl::g_logger.logf(1, "HL_EXPORT_ACCOUNT: Wrote %s", path);
         return 1;
     }
 
