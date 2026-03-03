@@ -51,17 +51,17 @@ bool parsePerpDex(const char* fullName, char* perpDex, size_t perpDexSize,
     // Split at LAST underscore to extract perpDex venue suffix [OPM-169]
     // "GOLD-USDC_xyz" -> perpDex="xyz", coin="GOLD-USDC"
     // "A.B-USDC_xyz"  -> perpDex="xyz", coin="A.B-USDC" (last underscore wins)
-    const char* lastDot = strrchr(fullName, '_');
-    if (lastDot && lastDot > fullName && lastDot[1] != '\0') {
+    const char* lastUnderscore = strrchr(fullName, '_');
+    if (lastUnderscore && lastUnderscore > fullName && lastUnderscore[1] != '\0') {
         // Has perpDex suffix after the underscore
-        size_t coinLen = lastDot - fullName;
+        size_t coinLen = lastUnderscore - fullName;
         if (coinLen < coinSize) {
             strncpy_s(coin, coinSize, fullName, coinLen);
             coin[coinLen] = '\0';
         } else {
             strncpy_s(coin, coinSize, fullName, _TRUNCATE);
         }
-        strncpy_s(perpDex, perpDexSize, lastDot + 1, _TRUNCATE);
+        strncpy_s(perpDex, perpDexSize, lastUnderscore + 1, _TRUNCATE);
         return true;
     } else {
         // No underscore — perp, spot, or legacy bare coin
