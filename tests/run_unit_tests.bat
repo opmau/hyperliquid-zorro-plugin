@@ -181,7 +181,7 @@ REM ============================================================================
 REM Test 11: TWAP Order Construction [OPM-81]
 REM Prevents: Incorrect msgpack field ordering, wrong TWAP action types
 REM =============================================================================
-echo [11/12] Testing TWAP order construction...
+echo [11/13] Testing TWAP order construction...
 call compile_twap_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
@@ -196,7 +196,7 @@ REM ============================================================================
 REM Test 12: scheduleCancel (Dead Man's Switch) [OPM-83]
 REM Prevents: Incorrect msgpack encoding, signature mismatch
 REM =============================================================================
-echo [12/12] Testing scheduleCancel signing...
+echo [12/13] Testing scheduleCancel signing...
 call compile_schedule_cancel_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
@@ -204,6 +204,21 @@ if !ERRORLEVEL! EQU 0 (
 ) else (
     set /a TESTS_FAILED+=1
     echo       FAILED - scheduleCancel signing tests failed!
+)
+echo.
+
+REM =============================================================================
+REM Test 13: batchModify (Atomic Order Modify) [OPM-80]
+REM Prevents: Incorrect msgpack encoding, wrong oid type, field ordering
+REM =============================================================================
+echo [13/13] Testing batchModify encoding...
+call compile_batch_modify_test.bat
+if !ERRORLEVEL! EQU 0 (
+    set /a TESTS_PASSED+=1
+    echo       PASSED
+) else (
+    set /a TESTS_FAILED+=1
+    echo       FAILED - batchModify encoding tests failed!
 )
 echo.
 
