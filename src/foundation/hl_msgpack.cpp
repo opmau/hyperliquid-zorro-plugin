@@ -484,5 +484,38 @@ ByteArray packScheduleCancelAction(uint64_t time) {
     return packer.data();
 }
 
+// --- Bracket (grouped) order encoding [OPM-79] ---
+
+ByteArray packBracketOrderAction(
+    const std::vector<BracketOrderWire>& orders,
+    const std::string& grouping
+) {
+    Packer packer;
+
+    // Main map with 3 keys: "type", "orders", "grouping"
+    // MUST be in this exact order to match Python SDK
+    packer.packMapHeader(3);
+
+    // 1. "type": "order" (FIRST!)
+    packer.packString("type");
+    packer.packString("order");
+
+    // 2. "orders": [{entry}, {tp}, {sl}] (SECOND!)
+    packer.packString("orders");
+    packer.packArrayHeader(orders.size());
+
+    for (const auto& o : orders) {
+        packOrderWire(packer, o.asset, o.isBuy, o.price, o.size,
+                      o.reduceOnly, o.tif, o.cloid,
+                      o.isTrigger, o.triggerIsMarket, o.triggerPx, o.tpsl);
+    }
+
+    // 3. "grouping": "normalTpsl" (THIRD!)
+    packer.packString("grouping");
+    packer.packString(grouping);
+
+    return packer.data();
+}
+
 } // namespace msgpack
 } // namespace hl

@@ -271,7 +271,8 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
                     updated.status = hl::determineFilledStatus(qr.filledSize, state.requestedSize);
                     updated.filledSize = qr.filledSize;
                     updated.avgPrice = qr.avgPrice;
-                } else if (strcmp(qr.status, "canceled") == 0) {
+                } else if (strcmp(qr.status, "canceled") == 0 ||
+                           strcmp(qr.status, "siblingFilledCanceled") == 0) {  // [OPM-79]
                     updated.status = hl::OrderStatus::Cancelled;
                 } else {
                     updated.status = hl::OrderStatus::Open;
@@ -410,7 +411,8 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
                     state.status = newSt;
                     if (qr.oid[0]) strncpy_s(state.orderId, qr.oid, _TRUNCATE);
                     hl::g_logger.logf(1, "BrokerTrade: HTTP fallback found fill for %d", tradeId);
-                } else if (strcmp(qr.status, "canceled") == 0) {
+                } else if (strcmp(qr.status, "canceled") == 0 ||
+                           strcmp(qr.status, "siblingFilledCanceled") == 0) {  // [OPM-79]
                     hl::trading::updateOrder(tradeId, 0, 0, hl::OrderStatus::Cancelled);
                     state.status = hl::OrderStatus::Cancelled;
                 } else if (qr.oid[0] && strcmp(state.orderId, qr.oid) != 0) {

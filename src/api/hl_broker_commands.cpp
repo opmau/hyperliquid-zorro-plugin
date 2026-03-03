@@ -19,6 +19,7 @@
 #include "hl_broker_internal.h"
 #include "../services/hl_trading_twap.h"
 #include "../services/hl_trading_modify.h"
+#include "../services/hl_trading_bracket.h"
 
 //=============================================================================
 // HANDLER IMPLEMENTATION
@@ -635,6 +636,21 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
             return 0;
         }
         return 1;
+    }
+
+    //=========================================================================
+    // BRACKET ORDER (50043) [OPM-79]
+    //=========================================================================
+
+    case HL_PLACE_BRACKET: {
+        if (parameter == 0) return 0;
+        const hl::BracketRequest* req = (const hl::BracketRequest*)parameter;
+        hl::BracketResult res = hl::trading::placeBracketOrder(*req);
+        if (!res.success) {
+            hl::g_logger.logf(1, "HL_PLACE_BRACKET failed: %s", res.error.c_str());
+            return 0;
+        }
+        return (double)res.entryTradeId;
     }
 
     default:
