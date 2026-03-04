@@ -434,6 +434,26 @@ int findAssetIndex(const char* coin) {
     idx = g_assets.findByCoin(coin);
     if (idx >= 0) return idx;
 
+    // Handle "dex:coin" API format (e.g., "xyz:XYZ100") [OPM-191]
+    const char* colon = strchr(coin, ':');
+    if (colon && colon > coin) {
+        char dexPart[32] = {0};
+        char bareCoin[64] = {0};
+        size_t dexLen = colon - coin;
+        if (dexLen < sizeof(dexPart)) {
+            strncpy_s(dexPart, sizeof(dexPart), coin, dexLen);
+            strncpy_s(bareCoin, sizeof(bareCoin), colon + 1, _TRUNCATE);
+            for (int i = 0; i < g_assets.count; ++i) {
+                const AssetInfo* asset = g_assets.getByIndex(i);
+                if (asset && asset->isPerpDex &&
+                    _stricmp(asset->coin, bareCoin) == 0 &&
+                    _stricmp(asset->perpDex, dexPart) == 0) {
+                    return i;
+                }
+            }
+        }
+    }
+
     // For perpDex assets, bare coin name fallback (e.g., "TSLA" -> first matching)
     auto it = s_perpDexMap.find(std::string(coin));
     if (it != s_perpDexMap.end()) {
