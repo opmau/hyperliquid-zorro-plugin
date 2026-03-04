@@ -71,6 +71,26 @@ struct CancelAction {
     CancelAction();
 };
 
+/// TWAP order action for EIP-712 encoding [OPM-81]
+struct TwapOrderAction {
+    int asset;              // a: asset index
+    bool isBuy;             // b: buy or sell
+    std::string size;       // s: total size (formatted string)
+    bool reduceOnly;        // r: reduce-only flag
+    int minutes;            // m: duration in minutes
+    bool randomize;         // t: randomize suborder timing
+
+    TwapOrderAction() : asset(0), isBuy(true), reduceOnly(false), minutes(30), randomize(true) {}
+};
+
+/// TWAP cancel action for EIP-712 encoding [OPM-81]
+struct TwapCancelAction {
+    int asset;              // a: asset index
+    uint64_t twapId;        // t: TWAP ID to cancel
+
+    TwapCancelAction() : asset(0), twapId(0) {}
+};
+
 // =============================================================================
 // Core EIP-712 Functions
 // =============================================================================
@@ -101,6 +121,19 @@ ByteArray hashOrderAction(const OrderAction& action, uint64_t nonce,
 /// @return 32-byte action hash
 ByteArray hashCancelAction(const CancelAction& action, uint64_t nonce,
                            const std::string& vaultAddress = "");
+
+/// Hash a batchModify action for EIP-712 [OPM-80]
+/// Takes pre-packed msgpack bytes (from packBatchModifyAction).
+ByteArray hashBatchModifyAction(const ByteArray& packedAction, uint64_t nonce,
+                                const std::string& vaultAddress = "");
+
+/// Hash a TWAP order action for EIP-712 [OPM-81]
+ByteArray hashTwapOrderAction(const TwapOrderAction& action, uint64_t nonce,
+                              const std::string& vaultAddress = "");
+
+/// Hash a TWAP cancel action for EIP-712 [OPM-81]
+ByteArray hashTwapCancelAction(const TwapCancelAction& action, uint64_t nonce,
+                               const std::string& vaultAddress = "");
 
 /// Generate final EIP-712 message hash
 /// Combines domain separator and struct hash per EIP-712 spec:
@@ -137,6 +170,36 @@ ByteArray hashCancelForSigning(const CancelAction& action,
                                bool isMainnet,
                                uint64_t nonce = 0,
                                const std::string& vaultAddress = "");
+
+/// Hash complete batchModify for signing [OPM-80]
+/// Takes pre-packed msgpack bytes — caller is responsible for packing the action.
+ByteArray hashBatchModifyForSigning(const ByteArray& packedAction,
+                                    bool isMainnet,
+                                    uint64_t nonce = 0,
+                                    const std::string& vaultAddress = "");
+
+/// Hash complete TWAP order for signing [OPM-81]
+ByteArray hashTwapOrderForSigning(const TwapOrderAction& action,
+                                  bool isMainnet,
+                                  uint64_t nonce = 0,
+                                  const std::string& vaultAddress = "");
+
+/// Hash complete TWAP cancel for signing [OPM-81]
+ByteArray hashTwapCancelForSigning(const TwapCancelAction& action,
+                                   bool isMainnet,
+                                   uint64_t nonce = 0,
+                                   const std::string& vaultAddress = "");
+
+/// Hash a scheduleCancel action for EIP-712 [OPM-83]
+/// @param time  Cancel time in UTC ms (0 = clear/unschedule)
+ByteArray hashScheduleCancelAction(uint64_t time, uint64_t nonce,
+                                   const std::string& vaultAddress = "");
+
+/// Hash complete scheduleCancel for signing [OPM-83]
+ByteArray hashScheduleCancelForSigning(uint64_t time,
+                                       bool isMainnet,
+                                       uint64_t nonce = 0,
+                                       const std::string& vaultAddress = "");
 
 // =============================================================================
 // Utility Functions

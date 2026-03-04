@@ -221,6 +221,14 @@ PriceData getPrice(const char* coin, uint32_t maxAgeMs) {
         return result;
     }
 
+    // "null" response = asset does not exist on exchange — halt immediately
+    if (resp.body == "null") {
+        g_fatalError = true;
+        sprintf_s(g_fatalErrorMsg, "Symbol '%s' not found on exchange", coin);
+        g_logger.logf(1, "FATAL: %s", g_fatalErrorMsg);
+        return result;
+    }
+
     // Parse bid/ask from response using yyjson
     // Format: {"levels":[[{"px":"50000",...}],[{"px":"50001",...}]]}
     const char* jsonStr = resp.body.c_str();
@@ -328,6 +336,13 @@ PriceData getPerpDexPrice(const char* perpDex, const char* coin, uint32_t maxAge
         result.ask = httpAsk;
         result.mid = (httpBid + httpAsk) / 2.0;
         result.timestamp = GetTickCount();
+
+        // Seed WS cache from HTTP fallback [OPM-142]
+        if (g_priceCache) {
+            auto* cache = reinterpret_cast<hl::ws::PriceCache*>(g_priceCache);
+            cache->setBidAsk(std::string(apiCoin), httpBid, httpAsk);
+        }
+
         recordSeed(apiCoin);
     } else if (httpBid > 0.0) {
         // Fallback: only bid available (thin order book)
@@ -339,6 +354,61 @@ PriceData getPerpDexPrice(const char* perpDex, const char* coin, uint32_t maxAge
     }
 
     return result;
+}
+
+double getFundingRate(const char* coin) {
+    if (!coin || !*coin) return 0.0;
+
+    // Look up asset to determine perpDex and universe index
+    const AssetInfo* asset = getAsset(coin);
+    if (!asset) {
+        logMsg(1, "getFundingRate", "Asset not found in metadata");
+        return 0.0;
+    }
+
+    // Build metaAndAssetCtxs request (perpDex-aware)
+    char payload[256];
+    if (asset->isPerpDex && asset->perpDex[0]) {
+        sprintf_s(payload, "{\"type\":\"metaAndAssetCtxs\",\"dex\":\"%s\"}", asset->perpDex);
+    } else {
+        strcpy_s(payload, "{\"type\":\"metaAndAssetCtxs\"}");
+    }
+
+    http::Response resp = http::infoPost(payload, false);
+    if (!resp.success()) {
+        logMsg(1, "getFundingRate", "API request failed");
+        return 0.0;
+    }
+
+    // Response: [metaObj, [assetCtx0, assetCtx1, ...]]
+    yyjson_doc* doc = yyjson_read(resp.body.c_str(), resp.body.size(), 0);
+    if (!doc) return 0.0;
+    yyjson_val* root = yyjson_doc_get_root(doc);
+    if (!yyjson_is_arr(root)) { yyjson_doc_free(doc); return 0.0; }
+
+    // Asset contexts array is the second element
+    yyjson_val* ctxs = yyjson_arr_get(root, 1);
+    if (!ctxs || !yyjson_is_arr(ctxs)) { yyjson_doc_free(doc); return 0.0; }
+
+    // PerpDex assets use localIndex; regular perps use index
+    int idx = asset->isPerpDex ? asset->localIndex : asset->index;
+    yyjson_val* ctx = yyjson_arr_get(ctxs, (size_t)idx);
+    if (!ctx) {
+        logMsg(1, "getFundingRate", "Asset index out of range in response");
+        yyjson_doc_free(doc);
+        return 0.0;
+    }
+
+    double rate = json::getDouble(ctx, "funding");
+    yyjson_doc_free(doc);
+
+    if (g_config.diagLevel >= 1) {
+        char msg[128];
+        sprintf_s(msg, "%s funding=%.10f (%.4f bps/hr)", coin, rate, rate * 10000.0);
+        logMsg(1, "getFundingRate", msg);
+    }
+
+    return rate;
 }
 
 bool hasRealtimePrice(const char* coin, uint32_t maxAgeMs) {

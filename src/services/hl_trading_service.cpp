@@ -185,6 +185,7 @@ void notifyFill(const char* cloid, double filledSize, double avgPrice, const cha
     if (status) {
         if (strcmp(status, "filled") == 0) orderStatus = OrderStatus::Filled;
         else if (strcmp(status, "canceled") == 0 || strcmp(status, "cancelled") == 0) orderStatus = OrderStatus::Cancelled;
+        else if (strcmp(status, "siblingFilledCanceled") == 0) orderStatus = OrderStatus::Cancelled;  // [OPM-79]
         else if (strcmp(status, "partial") == 0) orderStatus = OrderStatus::PartialFill;
         else if (strcmp(status, "error") == 0) orderStatus = OrderStatus::Error;
     }
@@ -393,7 +394,7 @@ OrderResult placeOrderWithId(const OrderRequest& request, int tradeId) {
     // STEP 5: Submit to exchange via HTTP
     http::Response resp = http::exchangePost(orderJson);
     if (!resp.success()) {
-        logMsg(1, "placeOrder", "HTTP request failed — querying exchange for order status [OPM-89]");
+        logMsg(1, "placeOrder", "HTTP request failed — querying exchange for order status");
 
         Sleep(1000);
 
