@@ -12,10 +12,14 @@
 // - SET_DIAGNOSTICS, SET_AMOUNT, SET_HWND
 // - GET_POSITION, GET_TRADES, GET_PRICE
 // - DO_CANCEL
-// - Custom commands (50010-50021)
+// - Export commands (50001-50003)
+// - Custom commands (50010-50031)
 //=============================================================================
 
 #include "hl_broker_internal.h"
+#include "../services/hl_trading_twap.h"
+#include "../services/hl_trading_modify.h"
+#include "../services/hl_trading_bracket.h"
 
 //=============================================================================
 // HANDLER IMPLEMENTATION
@@ -98,8 +102,12 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
             strcpy_s(hl::g_config.orderType, "Gtc");
             hl::trading::setOrderType("Gtc");
             break;
+        case 4:  // Broker-specific → ALO (Post-Only / Add-Liquidity-Only)
+            strcpy_s(hl::g_config.orderType, "Alo");
+            hl::trading::setOrderType("Alo");
+            break;
         default:
-            return 0;  // AON (1), AON+GTC (3), broker-specific (4) not supported
+            return 0;  // AON (1), AON+GTC (3) not supported
         }
         if (hl::g_config.diagLevel >= 1) {
             hl::g_logger.logf(1, "SET_ORDERTYPE: %d -> %s%s",
@@ -219,6 +227,16 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
                 char msg[64];
                 sprintf_s(msg, "Rebuilt %d positions", posCount);
                 hl::g_logger.log(1, msg);
+            }
+
+            // [OPM-136] Warn when no positions found during rebuild
+            if (posCount == 0 && hl::g_logger.callback) {
+                hl::account::Balance bal = hl::account::getBalance();
+                if (bal.dataReceived && bal.accountValue <= 0) {
+                    hl::g_logger.callback(
+                        "WARNING: No positions found and balance is zero. "
+                        "Verify the User field contains your MASTER account address.");
+                }
             }
             return 1;
         }
@@ -426,6 +444,213 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
             hl::g_logger.log(1, msg);
         }
         return ok ? 1 : 0;
+    }
+
+    case HL_GET_FUNDING_RATE: {
+        // Return current hourly funding rate for a coin [OPM-172]
+        // Parameter: string coin name, or 0 to use current symbol
+        const char* coin = nullptr;
+        if (parameter != 0) {
+            coin = (const char*)parameter;
+        } else {
+            coin = hl::g_trading.currentSymbol;
+        }
+        if (!coin || !*coin) return 0.0;
+        return hl::market::getFundingRate(coin);
+    }
+
+    case HL_FORCE_WS_DISCONNECT: {
+        // Debug: force WebSocket disconnect to test auto-reconnect [OPM-170]
+        if (!hl::g_wsManager) return 0;
+        auto* wsMgr = static_cast<hl::ws::WebSocketManager*>(hl::g_wsManager);
+        hl::g_logger.log(1, "DEBUG: Forcing WS disconnect (OPM-170 test)");
+        wsMgr->forceDisconnectForTest();
+        return 1;
+    }
+
+    case HL_SCHEDULE_CANCEL: {
+        // Dead man's switch [OPM-83]
+        // param = seconds from now (0 = clear). Plugin converts to absolute ms.
+        int seconds = (int)parameter;
+        if (seconds > 0) {
+            uint64_t timeMs = ((uint64_t)time(nullptr) + (uint64_t)seconds) * 1000;
+            return hl::trading::scheduleCancel(timeMs) ? 1 : 0;
+        }
+        return hl::trading::clearScheduleCancel() ? 1 : 0;
+    }
+
+    //=========================================================================
+    // EXPORT COMMANDS (50001-50003) [OPM-13]
+    //=========================================================================
+
+    case HL_EXPORT_ASSETS: {
+        // Export basic asset CSV for top coins (BTC, ETH, SOL)
+        const char* path = (const char*)parameter;
+        if (!path || !*path) return 0;
+
+        FILE* f = nullptr;
+        if (0 != fopen_s(&f, path, "w") || !f) return 0;
+
+        fprintf(f, "Name,Price,Spread,RollLong,RollShort,PIP,PIPCost,MarginCost,Leverage,LotAmount,Commission\n");
+
+        const char* coins[] = {"BTC", "ETH", "SOL"};
+        for (int i = 0; i < 3; i++) {
+            hl::PriceData px = hl::market::getPrice(coins[i]);
+            if (px.mid <= 0) continue;
+
+            const hl::AssetInfo* asset = hl::market::getAsset(coins[i]);
+            double pip, lotAmt;
+            int lev;
+            if (asset) {
+                pip = pow(10.0, -asset->pxDecimals);
+                lotAmt = pow(10.0, -asset->szDecimals);
+                lev = asset->maxLeverage;
+            } else {
+                pip = (px.mid >= 1000.0) ? 0.5 : 0.01;
+                lotAmt = 1.0;
+                lev = 1;
+            }
+            double pipCost = pip * lotAmt;  // 10^(-6) for perps, 10^(-8) for spot [OPM-141]
+            double spread = (px.ask > 0 && px.bid > 0) ? (px.ask - px.bid) : 0.0;
+
+            fprintf(f, "%s,%.8f,%.8f,0,0,%.8f,%.8f,0,%d,%.8f,-0.035\n",
+                    coins[i], px.mid, spread, pip, pipCost, lev, lotAmt);
+        }
+
+        fclose(f);
+        if (hl::g_config.diagLevel >= 1)
+            hl::g_logger.logf(1, "HL_EXPORT_ASSETS: Wrote %s", path);
+        return 1;
+    }
+
+    case HL_EXPORT_META: {
+        // Export all assets from registry into Zorro Assets CSV
+        const char* path = (const char*)parameter;
+        if (!path || !*path) return 0;
+        if (hl::g_assets.count <= 0) return 0;
+
+        FILE* f = nullptr;
+        if (0 != fopen_s(&f, path, "w") || !f) return 0;
+
+        fprintf(f, "Name,Price,Spread,RollLong,RollShort,PIP,PIPCost,MarginCost,Leverage,LotAmount,Commission\n");
+
+        // Use PriceCache for fast bulk lookups (no HTTP fallback)
+        hl::ws::PriceCache* cache = hl::g_priceCache
+            ? static_cast<hl::ws::PriceCache*>(hl::g_priceCache) : nullptr;
+
+        int written = 0;
+        for (int i = 0; i < hl::g_assets.count; i++) {
+            const hl::AssetInfo* asset = hl::g_assets.getByIndex(i);
+            if (!asset || !asset->coin[0]) continue;
+
+            double mid = 0.0, spread = 0.0;
+            if (cache) {
+                double bid = cache->getBid(asset->coin);
+                double ask = cache->getAsk(asset->coin);
+                if (bid > 0 && ask > 0) {
+                    mid = (bid + ask) / 2.0;
+                    spread = ask - bid;
+                }
+            }
+
+            double pip = pow(10.0, -asset->pxDecimals);
+            double lotAmt = pow(10.0, -asset->szDecimals);
+            double pipCost = pip * lotAmt;  // 10^(-6) for perps, 10^(-8) for spot [OPM-141]
+
+            fprintf(f, "%s,%.8f,%.8f,0,0,%.8f,%.8f,0,%d,%.8f,-0.035\n",
+                    asset->coin, mid, spread, pip, pipCost, asset->maxLeverage, lotAmt);
+            written++;
+        }
+
+        fclose(f);
+        if (hl::g_config.diagLevel >= 1)
+            hl::g_logger.logf(1, "HL_EXPORT_META: Wrote %d assets to %s", written, path);
+        return written;
+    }
+
+    case HL_EXPORT_ACCOUNT: {
+        // Export Accounts.csv row with current connection info
+        const char* path = (const char*)parameter;
+        if (!path || !*path) return 0;
+
+        FILE* f = nullptr;
+        if (0 != fopen_s(&f, path, "w") || !f) return 0;
+
+        const char* dllName =
+#ifdef DEV_BUILD
+            "Hyperliquid_Dev.dll";
+#else
+            "Hyperliquid.dll";
+#endif
+
+        fprintf(f, "Name,Server,AccountId,User,Pass,Assets,CCY,Real,NFA,Plugin\n");
+        fprintf(f, "%s,%s,%s,%s,%s,AssetsHyperliquid,USD,%d,0,%s\n",
+                PLUGIN_NAME,
+                hl::g_config.baseUrl[0] ? hl::g_config.baseUrl : "https://api.hyperliquid.xyz",
+                hl::g_config.walletAddress[0] ? hl::g_config.walletAddress : "0",
+                hl::g_config.walletAddress[0] ? hl::g_config.walletAddress : "0",
+                hl::g_config.privateKey[0] ? hl::g_config.privateKey : "0",
+                hl::g_config.isTestnet ? 0 : 1,
+                dllName);
+
+        fclose(f);
+        if (hl::g_config.diagLevel >= 1)
+            hl::g_logger.logf(1, "HL_EXPORT_ACCOUNT: Wrote %s", path);
+        return 1;
+    }
+
+    //=========================================================================
+    // TWAP COMMANDS (50040-50041) [OPM-81]
+    //=========================================================================
+
+    case HL_PLACE_TWAP: {
+        if (parameter == 0) return 0;
+        const hl::TwapRequest* req = (const hl::TwapRequest*)parameter;
+        hl::TwapResult res = hl::trading::placeTwapOrder(*req);
+        if (!res.success) {
+            hl::g_logger.logf(1, "HL_PLACE_TWAP failed: %s", res.error.c_str());
+            return 0;
+        }
+        return (double)res.twapId;
+    }
+
+    case HL_CANCEL_TWAP: {
+        uint64_t twapId = (uint64_t)parameter;
+        if (twapId == 0) return 0;
+        const char* coin = hl::g_trading.currentSymbol;
+        if (!coin || !*coin) return 0;
+        bool ok = hl::trading::cancelTwapOrder(coin, twapId);
+        return ok ? 1 : 0;
+    }
+
+    //=========================================================================
+    // MODIFY ORDER (50042) [OPM-80]
+    //=========================================================================
+
+    case HL_MODIFY_ORDER: {
+        if (parameter == 0) return 0;
+        const hl::ModifyRequest* req = (const hl::ModifyRequest*)parameter;
+        hl::ModifyResult res = hl::trading::modifyOrder(*req);
+        if (!res.success) {
+            hl::g_logger.logf(1, "HL_MODIFY_ORDER failed: %s", res.error.c_str());
+            return 0;
+        }
+        return 1;
+    }
+
+    //=========================================================================
+    // BRACKET ORDER (50043) [OPM-79]
+    //=========================================================================
+
+    case HL_PLACE_BRACKET: {
+        if (parameter == 0) return 0;
+        const hl::BracketRequest* req = (const hl::BracketRequest*)parameter;
+        hl::BracketResult res = hl::trading::placeBracketOrder(*req);
+        if (!res.success) {
+            hl::g_logger.logf(1, "HL_PLACE_BRACKET failed: %s", res.error.c_str());
+            return 0;
+        }
+        return (double)res.entryTradeId;
     }
 
     default:

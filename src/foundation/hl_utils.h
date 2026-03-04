@@ -20,19 +20,21 @@ namespace utils {
 const char* skipWhitespace(const char* p);
 
 // Normalize Zorro symbol to Hyperliquid coin name
-// "BTC/USD" -> "BTC", "btc-usd" -> "BTC" (uppercase, strips suffix)
+// "BTC-USD" -> "BTC" (strips dash suffix, uppercase)
+// "HYPE/USDC" -> "HYPE/USDC" (preserves slash for spot)
+// "@107" -> "@107" (preserves @-format for spot)
 void normalizeCoin(const char* symbol, char* out, size_t outSize);
 
-// Parse perpDex venue from display name (dot-suffix format)
-// "GOLD-USDC.xyz" -> perpDex="xyz", coin="GOLD-USDC", returns true
+// Parse perpDex venue from display name (underscore-suffix format) [OPM-169]
+// "GOLD-USDC_xyz" -> perpDex="xyz", coin="GOLD-USDC", returns true
 // "BTC-USDC" -> perpDex="", coin="BTC-USDC", returns false
 // "BTC" -> perpDex="", coin="BTC", returns false
-// Splits at LAST dot to handle hypothetical coin names with dots
+// Splits at LAST underscore to extract perpDex venue suffix
 bool parsePerpDex(const char* fullName, char* perpDex, size_t perpDexSize,
                   char* coin, size_t coinSize);
 
-// Build display name from components (matches Hyperliquid UI convention)
-// ("xyz", "GOLD", "USDC") -> "GOLD-USDC.xyz"   (perpDex)
+// Build display name from components [OPM-169: underscore separator for Zorro history files]
+// ("xyz", "GOLD", "USDC") -> "GOLD-USDC_xyz"   (perpDex)
 // ("", "BTC", "USDC")     -> "BTC-USDC"         (perp)
 // ("", "BTC", "")          -> "BTC"              (legacy)
 std::string buildCoinName(const char* perpDex, const char* coin,

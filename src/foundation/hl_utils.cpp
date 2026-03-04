@@ -48,23 +48,23 @@ bool parsePerpDex(const char* fullName, char* perpDex, size_t perpDexSize,
                   char* coin, size_t coinSize) {
     if (!fullName || !perpDex || !coin) return false;
 
-    // Split at LAST dot to extract perpDex venue suffix
-    // "GOLD-USDC.xyz" -> perpDex="xyz", coin="GOLD-USDC"
-    // "A.B-USDC.xyz"  -> perpDex="xyz", coin="A.B-USDC" (last dot wins)
-    const char* lastDot = strrchr(fullName, '.');
-    if (lastDot && lastDot > fullName && lastDot[1] != '\0') {
-        // Has perpDex suffix after the dot
-        size_t coinLen = lastDot - fullName;
+    // Split at LAST underscore to extract perpDex venue suffix [OPM-169]
+    // "GOLD-USDC_xyz" -> perpDex="xyz", coin="GOLD-USDC"
+    // "A.B-USDC_xyz"  -> perpDex="xyz", coin="A.B-USDC" (last underscore wins)
+    const char* lastUnderscore = strrchr(fullName, '_');
+    if (lastUnderscore && lastUnderscore > fullName && lastUnderscore[1] != '\0') {
+        // Has perpDex suffix after the underscore
+        size_t coinLen = lastUnderscore - fullName;
         if (coinLen < coinSize) {
             strncpy_s(coin, coinSize, fullName, coinLen);
             coin[coinLen] = '\0';
         } else {
             strncpy_s(coin, coinSize, fullName, _TRUNCATE);
         }
-        strncpy_s(perpDex, perpDexSize, lastDot + 1, _TRUNCATE);
+        strncpy_s(perpDex, perpDexSize, lastUnderscore + 1, _TRUNCATE);
         return true;
     } else {
-        // No dot — perp, spot, or legacy bare coin
+        // No underscore — perp, spot, or legacy bare coin
         perpDex[0] = '\0';
         strncpy_s(coin, coinSize, fullName, _TRUNCATE);
         return false;
@@ -82,9 +82,9 @@ std::string buildCoinName(const char* perpDex, const char* coin,
         result += collateral;
     }
 
-    // Append perpDex venue suffix if provided: "BTC-USDC" + "xyz" -> "BTC-USDC.xyz"
+    // Append perpDex venue suffix if provided: "BTC-USDC" + "xyz" -> "BTC-USDC_xyz" [OPM-169]
     if (perpDex && *perpDex) {
-        result += ".";
+        result += "_";
         result += perpDex;
     }
 
@@ -160,6 +160,15 @@ double roundToTickSize(double price, double tickSize) {
 
 double roundPriceForExchange(double price, int szDecimals, int maxDecimals) {
     if (price == 0.0) return 0.0;
+
+    // Guard: reject non-finite values (NaN, infinity)
+    if (!isfinite(price)) return 0.0;
+
+    // Guard: reject negative prices (exchange prices are always positive)
+    if (price < 0.0) return 0.0;
+
+    // Guard: reject prices beyond safe double precision for 5 sig-fig rounding
+    if (price >= 1e15) return 0.0;
 
     // Step 1: Round to 5 significant figures (matches Python f"{px:.5g}")
     const int sigFigs = 5;

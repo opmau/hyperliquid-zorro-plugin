@@ -154,6 +154,19 @@ int findTradeIdByOid(const char* oid);
 CloidQueryResult queryOrderByCloid(const char* cloid);
 
 // =============================================================================
+// DEAD MAN'S SWITCH (scheduleCancel) [OPM-83]
+// =============================================================================
+
+/// Schedule a cancel-all at a future time (dead man's switch).
+/// @param timeMs  Absolute UTC time in milliseconds (must be >=5s in the future)
+/// @return true if submitted successfully
+bool scheduleCancel(uint64_t timeMs);
+
+/// Clear a previously scheduled cancel-all.
+/// @return true if submitted successfully
+bool clearScheduleCancel();
+
+// =============================================================================
 // CONFIGURATION
 // =============================================================================
 

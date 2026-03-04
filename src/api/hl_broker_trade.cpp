@@ -30,6 +30,11 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
 
     if (!symbol || !*symbol || !volume) return 0;
 
+    // Fatal error: halt strategy [OPM-170]
+    if (hl::g_fatalError.load()) {
+        return 0;  // quit already called from BrokerAsset
+    }
+
     bool isCloseOrder = (stopDist == -1);
 
     // Detect trigger (stop-loss) order [OPM-77]
@@ -121,7 +126,9 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
     }
 
     // Return trade ID and fill info
-    if (pFill) *pFill = (int)round(result.filledSize / hl::g_trading.lotSize);
+    if (pFill) *pFill = (hl::g_trading.lotSize > 0)
+        ? (int)round(result.filledSize / hl::g_trading.lotSize)
+        : (int)round(result.filledSize);
     if (pPrice) *pPrice = result.avgPrice > 0 ? result.avgPrice : request.limitPrice;
 
     // Bridge fill → position cache so GET_POSITION sees it immediately [OPM-85]
@@ -211,8 +218,8 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
         return 0;
     }
 
-    if (pFill) *pFill = (result.filledSize > 0) ?
-                        (int)round(result.filledSize / hl::g_trading.lotSize) : abs(amount);
+    if (pFill) *pFill = (result.filledSize > 0 && hl::g_trading.lotSize > 0)
+        ? (int)round(result.filledSize / hl::g_trading.lotSize) : abs(amount);
     if (pClose) *pClose = result.avgPrice > 0 ? result.avgPrice : request.limitPrice;
 
     // Bridge fill → position cache so GET_POSITION sees it immediately [OPM-85]
@@ -264,7 +271,8 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
                     updated.status = hl::determineFilledStatus(qr.filledSize, state.requestedSize);
                     updated.filledSize = qr.filledSize;
                     updated.avgPrice = qr.avgPrice;
-                } else if (strcmp(qr.status, "canceled") == 0) {
+                } else if (strcmp(qr.status, "canceled") == 0 ||
+                           strcmp(qr.status, "siblingFilledCanceled") == 0) {  // [OPM-79]
                     updated.status = hl::OrderStatus::Cancelled;
                 } else {
                     updated.status = hl::OrderStatus::Open;
@@ -370,8 +378,7 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
             double avgPx = totalValue / totalFilled;
 
             if (totalFilled >= state.filledSize) {
-                hl::OrderStatus newSt = (totalFilled >= state.requestedSize * 0.999)
-                    ? hl::OrderStatus::Filled : hl::OrderStatus::PartialFill;
+                hl::OrderStatus newSt = hl::determineFilledStatus(totalFilled, state.requestedSize);
                 hl::trading::updateOrder(tradeId, totalFilled, avgPx, newSt);
                 state.filledSize = totalFilled;
                 state.avgPrice = avgPx;
@@ -404,7 +411,8 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
                     state.status = newSt;
                     if (qr.oid[0]) strncpy_s(state.orderId, qr.oid, _TRUNCATE);
                     hl::g_logger.logf(1, "BrokerTrade: HTTP fallback found fill for %d", tradeId);
-                } else if (strcmp(qr.status, "canceled") == 0) {
+                } else if (strcmp(qr.status, "canceled") == 0 ||
+                           strcmp(qr.status, "siblingFilledCanceled") == 0) {  // [OPM-79]
                     hl::trading::updateOrder(tradeId, 0, 0, hl::OrderStatus::Cancelled);
                     state.status = hl::OrderStatus::Cancelled;
                 } else if (qr.oid[0] && strcmp(state.orderId, qr.oid) != 0) {
@@ -438,7 +446,9 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
     }
 
     if (state.filledSize > 0) {
-        int fillLots = (int)round(state.filledSize / hl::g_trading.lotSize);
+        int fillLots = (hl::g_trading.lotSize > 0)
+            ? (int)round(state.filledSize / hl::g_trading.lotSize)
+            : (int)round(state.filledSize);
         return (fillLots > 0) ? fillLots : 1;
     }
 

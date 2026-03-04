@@ -76,6 +76,9 @@ add_library(hl_services STATIC
     src/services/hl_market_service.cpp
     src/services/hl_trading_service.cpp
     src/services/hl_trading_cancel.cpp
+    src/services/hl_trading_twap.cpp
+    src/services/hl_trading_modify.cpp
+    src/services/hl_trading_bracket.cpp
     src/services/hl_account_service.cpp
 )
 target_include_directories(hl_services PUBLIC
@@ -223,3 +226,14 @@ target_include_directories(test_ws_l2book_integration PRIVATE
     ${CMAKE_SOURCE_DIR}/tests
 )
 target_link_libraries(test_ws_l2book_integration PRIVATE hl_transport)
+
+# Reconnect subscription burst test [OPM-170]
+add_executable(test_reconnect_subs
+    tests/test_reconnect_subs.cpp
+)
+target_include_directories(test_reconnect_subs PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/transport
+    ${CMAKE_SOURCE_DIR}/src/foundation
+    ${CMAKE_SOURCE_DIR}/tests
+)
+target_link_libraries(test_reconnect_subs PRIVATE hl_transport)
