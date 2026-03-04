@@ -283,7 +283,7 @@ OrderResult placeOrderWithId(const OrderRequest& request, int tradeId) {
     const AssetInfo* assetInfo = g_assets.getByIndex(assetIndex);
 
     eip712::OrderAction orderAction;
-    orderAction.asset = assetIndex;
+    orderAction.asset = meta::getApiAssetId(assetIndex);
     orderAction.isBuy = (request.side == OrderSide::Buy);
 
     // Round price per Hyperliquid rules: 5 sig figs + max decimal places [OPM-76]
