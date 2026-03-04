@@ -350,7 +350,7 @@ int fetchPerpDexMeta(const char* perpDex) {
         strncpy_s(info.name, displayName.c_str(), _TRUNCATE);
         strncpy_s(info.coin, coinName, _TRUNCATE);
         strncpy_s(info.collateral, collateralName, _TRUNCATE);
-        info.index = startCount + added;
+        info.index = perpDexOffset + localIdx;  // API asset ID [OPM-191]
         info.szDecimals = szDecimals;
         info.pxDecimals = pxDecimals;
         info.minSize = pow(10.0, -szDecimals);
@@ -579,6 +579,11 @@ int getTotalAssetCount() {
 
 bool isMetaLoaded() {
     return s_metaLoaded;
+}
+
+int getApiAssetId(int registryIndex) {
+    const AssetInfo* info = g_assets.getByIndex(registryIndex);
+    return (info && info->index >= 0) ? info->index : registryIndex;
 }
 
 } // namespace meta

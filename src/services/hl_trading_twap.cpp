@@ -95,7 +95,7 @@ TwapResult placeTwapOrder(const TwapRequest& request) {
 
     // Build EIP-712 TWAP order action
     eip712::TwapOrderAction twapAction;
-    twapAction.asset = assetIndex;
+    twapAction.asset = meta::getApiAssetId(assetIndex);
     twapAction.isBuy = isBuy;
     twapAction.size = sizeStr;
     twapAction.reduceOnly = request.reduceOnly;
@@ -242,7 +242,7 @@ bool cancelTwapOrder(const char* coin, uint64_t twapId) {
 
     // Build EIP-712 TWAP cancel action
     eip712::TwapCancelAction cancelAction;
-    cancelAction.asset = assetIndex;
+    cancelAction.asset = meta::getApiAssetId(assetIndex);
     cancelAction.twapId = twapId;
 
     uint64_t nonce = generateNonce();
