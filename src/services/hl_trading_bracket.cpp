@@ -122,7 +122,7 @@ BracketResult placeBracketOrder(const BracketRequest& request) {
     // 1. Entry order (limit)
     {
         msgpack::BracketOrderWire w;
-        w.asset = assetIndex;
+        w.asset = meta::getApiAssetId(assetIndex);
         w.isBuy = isBuyEntry;
         w.price = fmtPrice(request.limitPrice);
         w.size = sizeStr;
@@ -145,7 +145,7 @@ BracketResult placeBracketOrder(const BracketRequest& request) {
             : request.tpTriggerPx * (1.0 - slippage);  // Sell: accept below trigger
 
         msgpack::BracketOrderWire w;
-        w.asset = assetIndex;
+        w.asset = meta::getApiAssetId(assetIndex);
         w.isBuy = tpIsBuy;
         w.price = fmtPrice(tpSlippagePrice);
         w.size = sizeStr;
@@ -167,7 +167,7 @@ BracketResult placeBracketOrder(const BracketRequest& request) {
             : request.slTriggerPx * (1.0 - slippage);
 
         msgpack::BracketOrderWire w;
-        w.asset = assetIndex;
+        w.asset = meta::getApiAssetId(assetIndex);
         w.isBuy = slIsBuy;
         w.price = fmtPrice(slSlippagePrice);
         w.size = sizeStr;

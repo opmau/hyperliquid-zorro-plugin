@@ -255,7 +255,7 @@ bool cancelOrder(const char* coin, const char* oid) {
 
     // Build EIP-712 cancel action
     eip712::CancelAction cancelAction;
-    cancelAction.asset = assetIndex;
+    cancelAction.asset = meta::getApiAssetId(assetIndex);
     cancelAction.orderId = (uint64_t)_atoi64(oid);
 
     // Hash with EIP-712 for signing

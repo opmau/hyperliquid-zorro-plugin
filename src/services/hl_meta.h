@@ -135,5 +135,10 @@ int getTotalAssetCount();
 /// Check if meta has been fetched
 bool isMetaLoaded();
 
+/// Convert registry index (from findAssetIndex) to Hyperliquid API asset ID
+/// For main perps: registry index == API ID (0, 1, 2, ...)
+/// For perpDex: API ID = perpDexOffset + localIndex (e.g., 110000)
+int getApiAssetId(int registryIndex);
+
 } // namespace meta
 } // namespace hl
