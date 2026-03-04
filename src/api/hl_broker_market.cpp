@@ -25,6 +25,17 @@ DLLFUNC int BrokerAsset(char* symbol, double* pPrice, double* pSpread,
                         double* pRollLong, double* pRollShort) {
     if (!symbol || !*symbol) return 0;
 
+    // Fatal error: halt strategy [OPM-170]
+    if (hl::g_fatalError.load()) {
+        static bool halted = false;
+        if (!halted) {
+            halted = true;
+            hl::g_logger.logf(1, "FATAL: %s", hl::g_fatalErrorMsg);
+            zorroQuit(hl::g_fatalErrorMsg);
+        }
+        return 0;
+    }
+
     if (hl::g_config.diagLevel >= 3) {
         hl::g_logger.logf(3, "BrokerAsset: %s", symbol);
     }
@@ -34,6 +45,14 @@ DLLFUNC int BrokerAsset(char* symbol, double* pPrice, double* pSpread,
     parsePerpDex(symbol, perpDex, sizeof(perpDex), coin, sizeof(coin));
 
     std::string coinForApi = buildCoinForApi(perpDex, coin);
+
+    // Reject coins that were banned for causing WS disconnects [OPM-170]
+    if (hl::g_wsManager) {
+        auto* wsMgr = static_cast<hl::ws::WebSocketManager*>(hl::g_wsManager);
+        if (wsMgr->isCoinBanned(coinForApi)) {
+            return 0;  // Fatal error already logged once above
+        }
+    }
 
     // Subscription mode: pPrice=NULL means "subscribe this asset"
     // Per Zorro docs (brokerplugin.md): return 1 if asset is available, no price needed
@@ -116,6 +135,11 @@ DLLFUNC int BrokerAccount(char* accountId, double* pBalance,
                           double* pTradeVal, double* pMarginVal) {
     if (!hl::g_config.walletAddress[0]) return 0;
 
+    // Fatal error: halt strategy [OPM-170]
+    if (hl::g_fatalError.load()) {
+        return 0;  // quit already called from BrokerAsset
+    }
+
     // Get balance from WS cache
     hl::account::Balance balance = hl::account::getBalance();
 
@@ -174,6 +198,23 @@ DLLFUNC int BrokerAccount(char* accountId, double* pBalance,
         hl::account::refreshBalance();
         hl::account::refreshSpotBalance();
         balance = hl::account::getBalance();
+
+        // [OPM-136] After HTTP confirmation, halt if zero balance AND zero positions.
+        // This prevents strategies from trading with stale/wrong data (e.g., agent
+        // wallet address in User field returns empty clearinghouseState).
+        if (balance.accountValue <= 0) {
+            auto positions = hl::account::getAllPositions();
+            if (positions.empty()) {
+                if (hl::g_logger.callback) {
+                    hl::g_logger.callback(
+                        "HALT: Account shows zero balance AND zero positions. "
+                        "If you have funds on Hyperliquid, check that the User field "
+                        "contains your MASTER account address (not the agent/API wallet). "
+                        "Strategy stopped to prevent incorrect trades.");
+                }
+                zorroQuit("Zero balance and zero positions — possible wrong address");
+            }
+        }
     }
 
     // Zorro expects: Balance + TradeVal = Equity

@@ -40,6 +40,9 @@ static GLOBALS* g_zorroGlobals = nullptr;
 static int (__cdecl *BrokerMessage)(const char* text) = nullptr;
 static int (__cdecl *BrokerProgress)(intptr_t progress) = nullptr;
 
+// Zorro quit function — call to halt the strategy like pressing [Stop]
+static int (__cdecl *pf_quit)(const char* text) = nullptr;
+
 // Shared state (extern-declared in hl_broker_internal.h)
 bool g_everReceivedAccountData = false;
 DWORD g_lastHttpFallbackTime = 0;
@@ -60,6 +63,8 @@ const DWORD HTTP_FALLBACK_COOLDOWN_MS = 30000;  // 30 seconds
 DLLFUNC int zorro(GLOBALS* Globals) {
     g_zorroGlobals = Globals;
 
+    // quit() at func_list.h line 14 → index 11. Halts the strategy.
+    pf_quit      = (int(__cdecl*)(const char*))                              Globals->Functions[11];
     // wait() at func_list.h line 16 → index 13. Used as nap() for non-blocking sleep.
     nap          = (int(*)(int))                                             Globals->Functions[13];
     // http_status at func_list.h line 145 → index 142 (verified: comment "//142")
@@ -72,6 +77,15 @@ DLLFUNC int zorro(GLOBALS* Globals) {
     http_request = (int(*)(const char*,const char*,const char*,const char*)) Globals->Functions[654];
 
     return SCRIPT_VERSION;
+}
+
+// Halt strategy — calls Zorro's quit("!...") to stop like pressing [Stop]
+void zorroQuit(const char* reason) {
+    if (pf_quit) {
+        char buf[300];
+        snprintf(buf, sizeof(buf), "!%s", reason);
+        pf_quit(buf);
+    }
 }
 
 // Zorro callback wrapper for logging
@@ -128,13 +142,13 @@ static void onOrderUpdate(const char* oid, const char* cloid,
 // HELPER FUNCTIONS (shared with hl_broker_market.cpp, hl_broker_trade.cpp)
 //=============================================================================
 
-// Parse Zorro symbol into perpDex venue and API coin name
+// Parse Zorro symbol into perpDex venue and API coin name [OPM-169]
 // Handles all three asset types:
-//   "GOLD-USDC.xyz" → perpDex="xyz", coin="GOLD" (perpDex: dot-suffix)
-//   "BTC-USDC"      → perpDex="",    coin="BTC"  (perp: strip collateral)
-//   "BTC/USDC"      → perpDex="",    coin="BTC/USDC" (spot: keep as-is)
-//   "@107"           → perpDex="",    coin="@107" (spot @-format)
-//   "BTC"            → perpDex="",    coin="BTC"  (legacy bare coin)
+//   "GOLD-USDC_xyz"  → perpDex="xyz", coin="GOLD" (perpDex: underscore-suffix)
+//   "BTC-USDC"       → perpDex="",    coin="BTC"  (perp: strip collateral)
+//   "BTC/USDC"       → perpDex="",    coin="BTC/USDC" (spot: keep as-is)
+//   "@107"            → perpDex="",    coin="@107" (spot @-format)
+//   "BTC"             → perpDex="",    coin="BTC"  (legacy bare coin)
 void parsePerpDex(const char* symbol, char* perpDex, size_t perpDexSize,
                   char* coin, size_t coinSize) {
     perpDex[0] = '\0';
@@ -148,9 +162,9 @@ void parsePerpDex(const char* symbol, char* perpDex, size_t perpDexSize,
         return;
     }
 
-    // PerpDex: dot-suffix format (GOLD-USDC.xyz)
-    // Split at last dot → perpDex=venue, remainder=COIN-COLLATERAL
-    if (strchr(symbol, '.')) {
+    // PerpDex: underscore-suffix format (GOLD-USDC_xyz) [OPM-169]
+    // Split at last underscore → perpDex=venue, remainder=COIN-COLLATERAL
+    if (strchr(symbol, '_')) {
         char displayCoin[64];
         hl::utils::parsePerpDex(symbol, perpDex, perpDexSize,
                                 displayCoin, sizeof(displayCoin));
@@ -220,7 +234,7 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
         HWND savedWindow = hl::g_config.zorroWindow;
         int savedDiagLevel = hl::g_config.diagLevel;
 
-        memset(&hl::g_config, 0, sizeof(hl::g_config));
+        SecureZeroMemory(&hl::g_config, sizeof(hl::g_config));
         hl::g_config.zorroWindow = savedWindow;
         hl::g_config.diagLevel = savedDiagLevel;
         hl::g_config.isTestnet = true;
@@ -306,6 +320,12 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
                 BrokerMessage("WARNING: Address not found on Hyperliquid. "
                     "Check that the address is correct.");
             }
+        } else if (role == hl::account::UserRole::Unknown) {
+            // [OPM-136] checkUserRole HTTP call failed — warn so it's visible
+            if (BrokerMessage) {
+                BrokerMessage("WARNING: Could not verify account role (network error). "
+                    "If balance shows 0, verify the User field address.");
+            }
         } else if (addressesDiffer && role == hl::account::UserRole::User) {
             hl::g_logger.logf(1, "BrokerLogin: Using agent key (signer=%s) for "
                 "master account %s", derivedAddr, hl::g_config.walletAddress);
@@ -378,7 +398,7 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
         }
 
         HWND savedWindow = hl::g_config.zorroWindow;
-        memset(&hl::g_config, 0, sizeof(hl::g_config));
+        SecureZeroMemory(&hl::g_config, sizeof(hl::g_config));
         hl::g_config.zorroWindow = savedWindow;
 
         return 0;

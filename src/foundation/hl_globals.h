@@ -144,6 +144,11 @@ extern Logger        g_logger;
 extern void* g_wsManager;
 extern void* g_priceCache;
 
+// Fatal error flag — set when WS detects an unrecoverable issue (e.g., toxic subscription).
+// When true, all broker functions return failure so Zorro stops trading. [OPM-170]
+extern std::atomic<bool> g_fatalError;
+extern char g_fatalErrorMsg[256];
+
 // =============================================================================
 // INITIALIZATION / CLEANUP
 // =============================================================================

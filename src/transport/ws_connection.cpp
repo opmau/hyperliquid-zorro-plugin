@@ -15,6 +15,7 @@
 
 #include "ws_connection.h"
 #include <IXNetSystem.h>
+#include <IXSocketTLSOptions.h>
 #include <cstdio>
 #include <cstdarg>
 
@@ -96,6 +97,14 @@ void Connection::stopAutoReconnect() {
 
 bool Connection::wasReconnected() {
     return reconnected_.exchange(false);
+}
+
+void Connection::forceCloseForTest() {
+    // Close the WebSocket with a normal close code, which will trigger
+    // the Close callback → disconnected state → auto-reconnect.
+    // This simulates a server-initiated close. [OPM-170]
+    log(1, "WS: DEBUG — force closing socket");
+    ws_.close();
 }
 
 //=============================================================================
@@ -215,6 +224,14 @@ bool Connection::connect(const char* hostname, bool secure,
     ws_.setUrl(url);
     // Auto-reconnect is configured by enableAutoReconnect() before connect [OPM-128]
     ws_.disablePerMessageDeflate();
+
+    // Explicit TLS: use system CA store, verify hostname [OPM-156]
+    if (secure) {
+        ix::SocketTLSOptions tlsOpts;
+        tlsOpts.caFile = "SYSTEM";
+        tlsOpts.disable_hostname_validation = false;
+        ws_.setTLSOptions(tlsOpts);
+    }
 
     // Set callback (captures 'this')
     ws_.setOnMessageCallback([this](const ix::WebSocketMessagePtr& msg) {

@@ -61,6 +61,12 @@ PriceData getPrice(const char* coin, uint32_t maxAgeMs = 1500);
 /// @return PriceData with bid/ask/mid (all 0 if not available)
 PriceData getPerpDexPrice(const char* perpDex, const char* coin, uint32_t maxAgeMs = 1500);
 
+/// Get current hourly funding rate for a coin
+/// @param coin Coin name (e.g., "BTC", "XYZ100")
+/// @return Hourly funding rate as a decimal (e.g., 0.0000125 = 0.00125%/hr), 0 on error
+/// Uses metaAndAssetCtxs endpoint. PerpDex-aware (auto-detects dex from asset metadata).
+double getFundingRate(const char* coin);
+
 /// Check if real-time (WebSocket) price is available and fresh
 /// @param coin Coin name (e.g., "BTC" or "xyz:XYZ100")
 /// @param maxAgeMs Maximum acceptable age (default 5000ms)
