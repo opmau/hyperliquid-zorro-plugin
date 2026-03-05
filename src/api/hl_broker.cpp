@@ -326,6 +326,20 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
                 BrokerMessage("WARNING: Could not verify account role (network error). "
                     "If balance shows 0, verify the User field address.");
             }
+        } else if (role == hl::account::UserRole::Subaccount ||
+                   role == hl::account::UserRole::Vault) {
+            // [OPM-202] Auto-detect sub-account/vault — route orders via vaultAddress
+            strncpy_s(hl::g_config.vaultAddress, hl::g_config.walletAddress, _TRUNCATE);
+            hl::g_config.accountMode = 1;
+            const char* roleStr = (role == hl::account::UserRole::Subaccount)
+                ? "sub-account" : "vault";
+            hl::g_logger.logf(1, "BrokerLogin: %s detected — orders will use "
+                "vaultAddress=%s", roleStr, hl::g_config.vaultAddress);
+            if (BrokerMessage) {
+                char msg[256];
+                sprintf_s(msg, "Trading as %s: %s", roleStr, hl::g_config.vaultAddress);
+                BrokerMessage(msg);
+            }
         } else if (addressesDiffer && role == hl::account::UserRole::User) {
             hl::g_logger.logf(1, "BrokerLogin: Using agent key (signer=%s) for "
                 "master account %s", derivedAddr, hl::g_config.walletAddress);

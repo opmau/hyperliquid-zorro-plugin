@@ -261,8 +261,9 @@ bool cancelOrder(const char* coin, const char* oid) {
     // Hash with EIP-712 for signing
     uint64_t nonce = generateNonce();
     bool isMainnet = !g_config.isTestnet;
+    std::string vault(g_config.vaultAddress);  // [OPM-202]
     eip712::ByteArray msgHash = eip712::hashCancelForSigning(
-        cancelAction, isMainnet, nonce, "");
+        cancelAction, isMainnet, nonce, vault);
 
     if (msgHash.empty() || msgHash.size() != 32) {
         logMsg(1, "cancelOrder", "Failed to generate EIP-712 message hash for cancel");
@@ -277,6 +278,14 @@ bool cancelOrder(const char* coin, const char* oid) {
     }
 
     // Build signed cancel JSON
+    // [OPM-202] Format vaultAddress for JSON payload
+    char vaultJson[128];
+    if (vault.empty()) {
+        strcpy_s(vaultJson, "null");
+    } else {
+        sprintf_s(vaultJson, "\"%s\"", vault.c_str());
+    }
+
     char cancelJson[1024];
     long long oidNum = _atoi64(oid);
     sprintf_s(cancelJson, sizeof(cancelJson),
@@ -290,13 +299,14 @@ bool cancelOrder(const char* coin, const char* oid) {
             "},"
             "\"nonce\":%llu,"
             "\"signature\":%s,"
-            "\"vaultAddress\":null,"
+            "\"vaultAddress\":%s,"
             "\"expiresAfter\":null"
         "}",
-        assetIndex,
+        cancelAction.asset,  // API asset ID, not registry index [OPM-191]
         oidNum,
         nonce,
-        sig.toJson().c_str()
+        sig.toJson().c_str(),
+        vaultJson
     );
 
     if (g_config.diagLevel >= 2) {
@@ -375,8 +385,9 @@ static bool submitScheduleCancel(uint64_t timeMs) {
     // Hash with EIP-712 for signing
     uint64_t nonce = generateNonce();
     bool isMainnet = !g_config.isTestnet;
+    std::string vault(g_config.vaultAddress);  // [OPM-202]
     eip712::ByteArray msgHash = eip712::hashScheduleCancelForSigning(
-        timeMs, isMainnet, nonce, "");
+        timeMs, isMainnet, nonce, vault);
 
     if (msgHash.empty() || msgHash.size() != 32) {
         logMsg(1, "scheduleCancel", "Failed to generate EIP-712 message hash");
@@ -390,6 +401,14 @@ static bool submitScheduleCancel(uint64_t timeMs) {
         return false;
     }
 
+    // [OPM-202] Format vaultAddress for JSON payload
+    char vaultJson[128];
+    if (vault.empty()) {
+        strcpy_s(vaultJson, "null");
+    } else {
+        sprintf_s(vaultJson, "\"%s\"", vault.c_str());
+    }
+
     // Build signed JSON payload
     char json[512];
     if (timeMs > 0) {
@@ -398,12 +417,13 @@ static bool submitScheduleCancel(uint64_t timeMs) {
                 "\"action\":{\"type\":\"scheduleCancel\",\"time\":%llu},"
                 "\"nonce\":%llu,"
                 "\"signature\":%s,"
-                "\"vaultAddress\":null,"
+                "\"vaultAddress\":%s,"
                 "\"expiresAfter\":null"
             "}",
             (unsigned long long)timeMs,
             (unsigned long long)nonce,
-            sig.toJson().c_str()
+            sig.toJson().c_str(),
+            vaultJson
         );
     } else {
         sprintf_s(json, sizeof(json),
@@ -411,11 +431,12 @@ static bool submitScheduleCancel(uint64_t timeMs) {
                 "\"action\":{\"type\":\"scheduleCancel\"},"
                 "\"nonce\":%llu,"
                 "\"signature\":%s,"
-                "\"vaultAddress\":null,"
+                "\"vaultAddress\":%s,"
                 "\"expiresAfter\":null"
             "}",
             (unsigned long long)nonce,
-            sig.toJson().c_str()
+            sig.toJson().c_str(),
+            vaultJson
         );
     }
 

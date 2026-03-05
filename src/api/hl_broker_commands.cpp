@@ -418,9 +418,16 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         int mode = (int)parameter;
         if (mode < 0 || mode > 1) return 0;
         hl::g_config.accountMode = mode;
+        // [OPM-202] When vault mode enabled, use walletAddress as vaultAddress
+        if (mode == 1 && !hl::g_config.vaultAddress[0]) {
+            strncpy_s(hl::g_config.vaultAddress, hl::g_config.walletAddress, _TRUNCATE);
+        } else if (mode == 0) {
+            hl::g_config.vaultAddress[0] = '\0';
+        }
         if (hl::g_config.diagLevel >= 1) {
-            hl::g_logger.logf(1, "Account mode: %d (%s)",
-                              mode, mode == 0 ? "API wallet" : "vault");
+            hl::g_logger.logf(1, "Account mode: %d (%s) vaultAddress=%s",
+                              mode, mode == 0 ? "API wallet" : "vault",
+                              hl::g_config.vaultAddress[0] ? hl::g_config.vaultAddress : "(none)");
         }
         return 1;
     }
