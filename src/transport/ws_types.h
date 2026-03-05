@@ -52,6 +52,7 @@ struct AccountData {
 // Position data from clearinghouseState subscription
 struct PositionData {
     std::string coin;
+    std::string dex;       // PerpDex name ("" = main dex, "xyz" = perpDex) [OPM-212]
     double size;           // Positive = long, negative = short
     double entryPx;        // Entry price
     double unrealizedPnl;  // Unrealized P&L
