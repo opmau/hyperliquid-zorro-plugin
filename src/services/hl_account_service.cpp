@@ -523,9 +523,9 @@ UserRole checkUserRole() {
         g_logger.logf(2, "checkUserRole: response=%s", resp.body.c_str());
     }
 
-    // Response is a JSON string like "User", "Agent", "Vault", "Subaccount", "Missing"
+    // Response JSON uses camelCase: "subAccount", not "Subaccount" [OPM-202]
     if (resp.body.find("Agent") != std::string::npos) return UserRole::Agent;
-    if (resp.body.find("Subaccount") != std::string::npos) return UserRole::Subaccount;
+    if (resp.body.find("subAccount") != std::string::npos) return UserRole::Subaccount;
     if (resp.body.find("Vault") != std::string::npos) return UserRole::Vault;
     if (resp.body.find("Missing") != std::string::npos) return UserRole::Missing;
     if (resp.body.find("User") != std::string::npos) return UserRole::User;
