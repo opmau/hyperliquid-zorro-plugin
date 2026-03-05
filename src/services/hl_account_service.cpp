@@ -15,6 +15,7 @@
 #include "../transport/json_helpers.h"
 #include <cstdio>
 #include <cstring>
+#include <set>
 
 namespace hl {
 namespace account {
@@ -219,6 +220,61 @@ double refreshSpotBalance() {
 }
 
 // =============================================================================
+// PERPDEX POSITION QUERIES [OPM-212]
+// =============================================================================
+
+// Collect unique perpDex names from the asset registry.
+// Avoids Transport→Service dependency by reading Foundation-layer g_assets directly.
+static std::set<std::string> getActivePerpDexNames() {
+    std::set<std::string> dexes;
+    for (int i = 0; i < g_assets.count; ++i) {
+        const AssetInfo* a = g_assets.getByIndex(i);
+        if (a && a->isPerpDex && a->perpDex[0]) {
+            dexes.insert(a->perpDex);
+        }
+    }
+    return dexes;
+}
+
+// Fetch clearinghouseState for each known perpDex via HTTP.
+// Each perpDex has its own position set (not returned by the default query).
+static bool s_perpDexPositionsFetched = false;
+
+static void refreshPerpDexPositions() {
+    auto dexes = getActivePerpDexNames();
+    if (dexes.empty()) return;
+
+    for (const auto& dex : dexes) {
+        char body[256];
+        sprintf_s(body, "{\"type\":\"clearinghouseState\",\"user\":\"%s\",\"dex\":\"%s\"}",
+                  g_config.walletAddress, dex.c_str());
+
+        if (g_config.diagLevel >= 1) {
+            g_logger.logf(1, "refreshPerpDexPositions: querying dex=%s", dex.c_str());
+        }
+
+        http::Response resp = http::infoPost(body, false);
+        if (!resp.success() || resp.body.empty()) {
+            g_logger.logf(1, "refreshPerpDexPositions: dex=%s HTTP failed", dex.c_str());
+            continue;
+        }
+
+        if (g_priceCache) {
+            auto* cache = reinterpret_cast<hl::ws::PriceCache*>(g_priceCache);
+            hl::ws::parseClearinghouseState(*cache, resp.body.c_str(),
+                                            g_config.diagLevel, g_logger.callback,
+                                            dex.c_str());
+        }
+
+        if (g_config.diagLevel >= 1) {
+            g_logger.logf(1, "refreshPerpDexPositions: dex=%s response (%zu bytes)",
+                         dex.c_str(), resp.body.length());
+        }
+    }
+    s_perpDexPositionsFetched = true;
+}
+
+// =============================================================================
 // POSITION IMPLEMENTATION
 // =============================================================================
 
@@ -232,7 +288,14 @@ static bool ensurePositionData() {
     DWORD posAge = cache->getPositionsAge();
 
     // If we have a position snapshot (even if empty), no fallback needed
-    if (posAge != MAXDWORD) return true;
+    if (posAge != MAXDWORD) {
+        // [OPM-212] Main-dex data is available. Fetch perpDex positions once.
+        // PerpDex positions are not included in the default clearinghouseState.
+        if (!s_perpDexPositionsFetched) {
+            refreshPerpDexPositions();
+        }
+        return true;
+    }
 
     // No position snapshot received — rate-limited HTTP fallback
     static DWORD lastAttempt = 0;
@@ -244,7 +307,12 @@ static bool ensurePositionData() {
 
     logMsg(1, "ensurePositionData", "No WS position data, HTTP fallback");
     lastAttempt = GetTickCount();
-    return refreshBalance();
+    bool ok = refreshBalance();
+    // [OPM-212] Also fetch perpDex positions on first HTTP fallback
+    if (ok && !s_perpDexPositionsFetched) {
+        refreshPerpDexPositions();
+    }
+    return ok;
 }
 
 PositionInfo getPosition(const char* coin) {
@@ -421,8 +489,8 @@ PositionInfo convertWsPosition(const std::string& coin, double size, double entr
 // =============================================================================
 
 void clearCache() {
-    // No local cache to clear - data is in ws_price_cache
-    // This would clear cached HTTP responses if we had them
+    // Reset perpDex fetch flag so positions are re-fetched on next query [OPM-212]
+    s_perpDexPositionsFetched = false;
 }
 
 uint32_t getAccountDataAge() {
@@ -523,12 +591,13 @@ UserRole checkUserRole() {
         g_logger.logf(2, "checkUserRole: response=%s", resp.body.c_str());
     }
 
-    // Response JSON uses camelCase: "subAccount", not "Subaccount" [OPM-202]
-    if (resp.body.find("Agent") != std::string::npos) return UserRole::Agent;
+    // API returns {"role":"<value>"} with lowercase/camelCase values [OPM-202]
+    // Order matters: "agent" response contains "user" in data field, so check "agent" first
+    if (resp.body.find("agent") != std::string::npos) return UserRole::Agent;
     if (resp.body.find("subAccount") != std::string::npos) return UserRole::Subaccount;
-    if (resp.body.find("Vault") != std::string::npos) return UserRole::Vault;
-    if (resp.body.find("Missing") != std::string::npos) return UserRole::Missing;
-    if (resp.body.find("User") != std::string::npos) return UserRole::User;
+    if (resp.body.find("vault") != std::string::npos) return UserRole::Vault;
+    if (resp.body.find("missing") != std::string::npos) return UserRole::Missing;
+    if (resp.body.find("user") != std::string::npos) return UserRole::User;
 
     return UserRole::Unknown;
 }
