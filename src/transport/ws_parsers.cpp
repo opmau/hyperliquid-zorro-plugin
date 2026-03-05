@@ -184,6 +184,15 @@ void parseClearinghouseState(PriceCache& cache, const char* jsonStr,
         if (json::getString(posObj, "coin", buf, sizeof(buf)))
             pos.coin = buf;
 
+        // [OPM-219] Normalize perpDex coin names for cache key consistency.
+        // API returns bare coin names ("XYZ100") for perpDex queries, but
+        // lookup uses "dex:COIN" format ("xyz:XYZ100"). Prefix at storage.
+        if (!dexStr.empty() && !pos.coin.empty()
+            && pos.coin[0] != '@'
+            && pos.coin.find(':') == std::string::npos) {
+            pos.coin = dexStr + ":" + pos.coin;
+        }
+
         pos.size          = json::getDouble(posObj, "szi");
         pos.entryPx       = json::getDouble(posObj, "entryPx");
         pos.unrealizedPnl = json::getDouble(posObj, "unrealizedPnl");
