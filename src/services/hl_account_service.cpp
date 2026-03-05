@@ -20,6 +20,12 @@ namespace hl {
 namespace account {
 
 // =============================================================================
+// SESSION STATE
+// =============================================================================
+
+static AbstractionMode s_abstractionMode = AbstractionMode::Unknown;
+
+// =============================================================================
 // LOGGING HELPER
 // =============================================================================
 
@@ -55,9 +61,14 @@ Balance getBalance(uint32_t maxAgeMs) {
         // age == MAXDWORD means WS never delivered clearinghouseState
         if (age < maxAgeMs) {
             result.dataReceived = true;
-            // [OPM-19] Perps equity + spot USDC = total balance visible in HL UI.
-            // clearinghouseState only returns perps data; spot USDC is separate.
-            result.accountValue = accData.accountValue + accData.spotUSDC;
+            // [OPM-200] Only add spot USDC for standard accounts.
+            // Unified/PortfolioMargin: crossMarginSummary.accountValue already includes spot.
+            // Unknown (query failure): assume unified (the default) to avoid inflation.
+            if (s_abstractionMode == AbstractionMode::Standard) {
+                result.accountValue = accData.accountValue + accData.spotUSDC;
+            } else {
+                result.accountValue = accData.accountValue;
+            }
             result.withdrawable = accData.withdrawable;
             result.marginUsed = accData.totalMarginUsed;
             result.totalNotional = accData.totalNtlPos;
@@ -441,6 +452,55 @@ void subscribeAccountData() {
     if (g_config.diagLevel >= 1) {
         logMsg(1, "subscribeAccountData", "Subscribed to clearinghouseState, openOrders, userFills");
     }
+}
+
+// =============================================================================
+// ACCOUNT ABSTRACTION MODE [OPM-200]
+// =============================================================================
+
+AbstractionMode queryAbstractionMode() {
+    if (!g_config.walletAddress[0]) {
+        s_abstractionMode = AbstractionMode::Unknown;
+        return s_abstractionMode;
+    }
+
+    char body[256];
+    sprintf_s(body, "{\"type\":\"userAbstraction\",\"user\":\"%s\"}", g_config.walletAddress);
+
+    http::Response resp = http::infoPost(body, false);
+    if (!resp.success() || resp.body.empty()) {
+        logMsg(1, "queryAbstractionMode", "HTTP request failed, assuming Unified (default)");
+        s_abstractionMode = AbstractionMode::Unknown;
+        return s_abstractionMode;
+    }
+
+    if (g_config.diagLevel >= 1) {
+        g_logger.logf(1, "queryAbstractionMode: response=%s", resp.body.c_str());
+    }
+
+    // Response is a JSON string value: "disabled", "unifiedAccount", "portfolioMargin"
+    if (resp.body.find("disabled") != std::string::npos) {
+        s_abstractionMode = AbstractionMode::Standard;
+    } else if (resp.body.find("portfolioMargin") != std::string::npos) {
+        s_abstractionMode = AbstractionMode::PortfolioMargin;
+    } else if (resp.body.find("unifiedAccount") != std::string::npos) {
+        s_abstractionMode = AbstractionMode::Unified;
+    } else {
+        logMsg(1, "queryAbstractionMode", "Unrecognized response, assuming Unified");
+        s_abstractionMode = AbstractionMode::Unknown;
+    }
+
+    const char* modeStr =
+        (s_abstractionMode == AbstractionMode::Standard) ? "Standard" :
+        (s_abstractionMode == AbstractionMode::Unified) ? "Unified" :
+        (s_abstractionMode == AbstractionMode::PortfolioMargin) ? "PortfolioMargin" : "Unknown";
+    g_logger.logf(1, "Account abstraction mode: %s", modeStr);
+
+    return s_abstractionMode;
+}
+
+AbstractionMode getAbstractionMode() {
+    return s_abstractionMode;
 }
 
 // =============================================================================

@@ -161,6 +161,25 @@ uint32_t getPositionsAge();
 void subscribeAccountData();
 
 // =============================================================================
+// ACCOUNT ABSTRACTION MODE [OPM-200]
+// =============================================================================
+
+/// Hyperliquid account abstraction mode.
+/// Determines how perps, spot, and perpDex capital is pooled.
+/// - Standard (disabled): Separate pools — spot USDC NOT in clearinghouseState
+/// - Unified: Single pool — spot USDC IS included in crossMarginSummary
+/// - PortfolioMargin: Multi-collateral — spot USDC IS included
+enum class AbstractionMode { Unknown, Standard, Unified, PortfolioMargin };
+
+/// Query the user's account abstraction mode via HTTP (userAbstraction endpoint).
+/// Should be called once at login. Result is cached for the session.
+/// @return The detected mode (Unknown if query fails)
+AbstractionMode queryAbstractionMode();
+
+/// Get the cached abstraction mode (from last queryAbstractionMode call).
+AbstractionMode getAbstractionMode();
+
+// =============================================================================
 // ADDRESS VALIDATION
 // =============================================================================
 
