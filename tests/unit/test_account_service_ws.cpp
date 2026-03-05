@@ -46,7 +46,9 @@ struct Balance {
 
 /// Extracted from account_service.cpp:getBalance() lines 45-90
 /// Tests the WS-cache-reading path without HTTP fallback.
-Balance getBalance(ws::PriceCache& cache, bool wsEnabled, uint32_t maxAgeMs) {
+/// @param isStandard true = Standard (disabled) mode where spotUSDC must be added separately
+Balance getBalance(ws::PriceCache& cache, bool wsEnabled, uint32_t maxAgeMs,
+                   bool isStandard = false) {
     Balance result;
 
     if (wsEnabled) {
@@ -55,8 +57,13 @@ Balance getBalance(ws::PriceCache& cache, bool wsEnabled, uint32_t maxAgeMs) {
 
         if (age < maxAgeMs) {
             result.dataReceived = true;
-            // [OPM-19] Perps equity + spot USDC = total balance
-            result.accountValue = accData.accountValue + accData.spotUSDC;
+            // [OPM-200] Only add spot USDC for standard accounts.
+            // Unified/PortfolioMargin: crossMarginSummary already includes spot.
+            if (isStandard) {
+                result.accountValue = accData.accountValue + accData.spotUSDC;
+            } else {
+                result.accountValue = accData.accountValue;
+            }
             result.withdrawable = accData.withdrawable;
             result.marginUsed = accData.totalMarginUsed;
             result.totalNotional = accData.totalNtlPos;
@@ -179,17 +186,29 @@ TEST_CASE(ws_getbalance_fresh_data) {
     ASSERT_GT(bal.timestamp, (uint32_t)0);
 }
 
-TEST_CASE(ws_getbalance_with_spot_usdc) {
-    // [OPM-19] Total = perps equity + spot USDC
+TEST_CASE(ws_getbalance_with_spot_usdc_standard) {
+    // [OPM-200] Standard mode: spot USDC added separately
     ws::PriceCache cache;
     cache.setAccountData(10000.0, 1000.0, 9000.0, 30000.0);
     cache.setSpotUSDC(500.0);
 
-    AcctWs::Balance bal = AcctWs::getBalance(cache, true, 60000);
+    AcctWs::Balance bal = AcctWs::getBalance(cache, true, 60000, true);  // isStandard=true
     ASSERT_TRUE(bal.dataReceived);
     // accountValue should be perps(10000) + spot(500) = 10500
     ASSERT_FLOAT_EQ_TOL(bal.accountValue, 10500.0, 0.01);
-    // withdrawable is perps-only
+    ASSERT_FLOAT_EQ_TOL(bal.withdrawable, 9000.0, 0.01);
+}
+
+TEST_CASE(ws_getbalance_with_spot_usdc_unified) {
+    // [OPM-200] Unified mode: spot USDC already in crossMarginSummary — don't add again
+    ws::PriceCache cache;
+    cache.setAccountData(10500.0, 1000.0, 9000.0, 30000.0);  // 10500 already includes spot
+    cache.setSpotUSDC(500.0);
+
+    AcctWs::Balance bal = AcctWs::getBalance(cache, true, 60000, false);  // isStandard=false (unified)
+    ASSERT_TRUE(bal.dataReceived);
+    // accountValue should be 10500 (NOT 11000)
+    ASSERT_FLOAT_EQ_TOL(bal.accountValue, 10500.0, 0.01);
     ASSERT_FLOAT_EQ_TOL(bal.withdrawable, 9000.0, 0.01);
 }
 
@@ -503,7 +522,8 @@ int main() {
 
     // getBalance with WS cache states
     RUN_TEST(ws_getbalance_fresh_data);
-    RUN_TEST(ws_getbalance_with_spot_usdc);
+    RUN_TEST(ws_getbalance_with_spot_usdc_standard);
+    RUN_TEST(ws_getbalance_with_spot_usdc_unified);
     RUN_TEST(ws_getbalance_stale_data);
     RUN_TEST(ws_getbalance_missing_data);
     RUN_TEST(ws_getbalance_ws_disabled);

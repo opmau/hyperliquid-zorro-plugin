@@ -69,12 +69,10 @@ DLLFUNC int BrokerAsset(char* symbol, double* pPrice, double* pSpread,
                 auto* wsMgr = static_cast<hl::ws::WebSocketManager*>(hl::g_wsManager);
                 wsMgr->subscribeL2Book(coinForApi);
             }
-            // Set static parameters (don't require price data)
-            double pip = pow(10.0, -asset->pxDecimals);
-            double lotAmount = pow(10.0, -asset->szDecimals);
-            if (pPip) *pPip = pip;
-            if (pPipCost) *pPipCost = pip * lotAmount;
-            if (pMinAmount) *pMinAmount = lotAmount;
+            // Set static parameters using pre-calculated values from metadata [OPM-198]
+            if (pPip) *pPip = asset->tickSize;
+            if (pPipCost) *pPipCost = asset->tickSize * asset->minSize;
+            if (pMinAmount) *pMinAmount = asset->minSize;
             if (pMargin) *pMargin = -asset->maxLeverage;
             if (pRollLong) *pRollLong = 0;
             if (pRollShort) *pRollShort = 0;
@@ -112,14 +110,15 @@ DLLFUNC int BrokerAsset(char* symbol, double* pPrice, double* pSpread,
     if (pPrice) *pPrice = price.ask;
     if (pSpread) *pSpread = price.ask - price.bid;
 
-    // Asset parameters
-    double pip = asset ? pow(10.0, -asset->pxDecimals) : 1.0;
-    double lotAmount = asset ? pow(10.0, -asset->szDecimals) : 0.0001;
-
-    if (pPip) *pPip = pip;
-    if (pPipCost) *pPipCost = pip * lotAmount;
-    if (pMinAmount) *pMinAmount = lotAmount;
-    if (pMargin) *pMargin = asset ? -asset->maxLeverage : -50;
+    // Asset parameters — use pre-calculated values, no fallbacks [OPM-198]
+    // When asset is NULL, leave PIP/PIPCost/LotAmount unchanged so Zorro
+    // keeps values from subscription or falls back to CSV asset list.
+    if (asset) {
+        if (pPip) *pPip = asset->tickSize;
+        if (pPipCost) *pPipCost = asset->tickSize * asset->minSize;
+        if (pMinAmount) *pMinAmount = asset->minSize;
+        if (pMargin) *pMargin = -asset->maxLeverage;
+    }
     if (pRollLong) *pRollLong = 0;
     if (pRollShort) *pRollShort = 0;
     if (pVolume) *pVolume = 0;
@@ -163,10 +162,13 @@ DLLFUNC int BrokerAccount(char* accountId, double* pBalance,
     }
     if (balance.dataReceived && !g_everReceivedAccountData) {
         g_everReceivedAccountData = true;
-        // [OPM-19] First WS delivery: fetch spot USDC (not available via WS).
-        // This runs once per login — spot balance rarely changes during a session.
+        // [OPM-200] Query abstraction mode to know whether spotUSDC is already
+        // included in crossMarginSummary (unified/portfolioMargin accounts).
+        hl::account::queryAbstractionMode();
+        // [OPM-19] Fetch spot USDC (not available via WS).
+        // Only added to balance for standard accounts (see getBalance).
         hl::account::refreshSpotBalance();
-        balance = hl::account::getBalance();  // Re-read with spot included
+        balance = hl::account::getBalance();  // Re-read with mode-aware balance
     }
 
     if (!balance.dataReceived) {
