@@ -236,6 +236,26 @@ static std::set<std::string> getActivePerpDexNames() {
     return dexes;
 }
 
+// [OPM-218] Subscribe to WS clearinghouseState for each known perpDex.
+// Called when perpDex assets are discovered (after asset loading).
+static bool s_perpDexWsSubscribed = false;
+
+static void subscribePerpDexChannels() {
+    if (s_perpDexWsSubscribed) return;
+    if (!g_config.enableWebSocket || !g_wsManager) return;
+
+    auto dexes = getActivePerpDexNames();
+    if (dexes.empty()) return;
+
+    auto* mgr = reinterpret_cast<hl::ws::WebSocketManager*>(g_wsManager);
+    for (const auto& dex : dexes)
+        mgr->subscribeClearinghouseStateDex(dex);
+
+    s_perpDexWsSubscribed = true;
+    if (g_config.diagLevel >= 1)
+        g_logger.logf(1, "subscribePerpDexChannels: subscribed %d perpDex(es)", (int)dexes.size());
+}
+
 // Fetch clearinghouseState for each known perpDex via HTTP.
 // Each perpDex has its own position set (not returned by the default query).
 static bool s_perpDexPositionsFetched = false;
@@ -289,8 +309,12 @@ static bool ensurePositionData() {
 
     // If we have a position snapshot (even if empty), no fallback needed
     if (posAge != MAXDWORD) {
-        // [OPM-212] Main-dex data is available. Fetch perpDex positions once.
-        // PerpDex positions are not included in the default clearinghouseState.
+        // [OPM-218] Subscribe to perpDex WS channels (dynamic discovery).
+        // Assets may have been loaded after WS connect — subscribe now.
+        subscribePerpDexChannels();
+
+        // [OPM-212] HTTP fallback: fetch perpDex positions once for initial data.
+        // WS subscriptions will provide real-time updates after this.
         if (!s_perpDexPositionsFetched) {
             refreshPerpDexPositions();
         }
@@ -489,8 +513,9 @@ PositionInfo convertWsPosition(const std::string& coin, double size, double entr
 // =============================================================================
 
 void clearCache() {
-    // Reset perpDex fetch flag so positions are re-fetched on next query [OPM-212]
+    // Reset perpDex flags so positions are re-fetched/re-subscribed [OPM-212, OPM-218]
     s_perpDexPositionsFetched = false;
+    s_perpDexWsSubscribed = false;
 }
 
 uint32_t getAccountDataAge() {
