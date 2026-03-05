@@ -448,14 +448,19 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
 
     case HL_GET_FUNDING_RATE: {
         // Return current hourly funding rate for a coin [OPM-172]
-        // Parameter: string coin name, or 0 to use current symbol
+        // Parameter: string coin name (recommended), or 0 to use currentSymbol
+        // currentSymbol is set by BrokerAsset price queries (from asset() calls)
         const char* coin = nullptr;
         if (parameter != 0) {
             coin = (const char*)parameter;
         } else {
             coin = hl::g_trading.currentSymbol;
         }
-        if (!coin || !*coin) return 0.0;
+        if (!coin || !*coin) {
+            hl::g_logger.log(1, "HL_GET_FUNDING_RATE: no coin — pass coin name as parameter "
+                                "or call asset() first [OPM-197]");
+            return 0.0;
+        }
         return hl::market::getFundingRate(coin);
     }
 

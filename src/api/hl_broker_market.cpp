@@ -101,10 +101,12 @@ DLLFUNC int BrokerAsset(char* symbol, double* pPrice, double* pSpread,
     if (!asset) asset = hl::market::getAsset(coin);
     if (!asset) asset = hl::market::getAsset(coinForApi.c_str());
 
-    // [OPM-6] DO NOT set currentSymbol here.
-    // BrokerAsset is called for ALL subscribed assets during each bar update.
-    // Setting currentSymbol here corrupts GET_PRICE context (returns wrong asset).
-    // GET_PRICE now exclusively uses priceSymbol (set by SET_SYMBOL).
+    // Update currentSymbol for custom broker commands (HL_GET_FUNDING_RATE, etc.)
+    // Safe because GET_PRICE uses priceSymbol exclusively [OPM-6].
+    // Note: BrokerAsset runs for ALL subscribed assets each bar, so currentSymbol
+    // reflects the last queried asset. Strategy asset() calls update it correctly
+    // because they trigger a BrokerAsset price query after the subscription loop.
+    strncpy_s(hl::g_trading.currentSymbol, coinForApi.c_str(), _TRUNCATE);
 
     // Zorro best practice: pPrice = ASK, pSpread = ASK - BID
     if (pPrice) *pPrice = price.ask;
