@@ -70,17 +70,17 @@ SpotBalanceResult parseSpotBalance(const char* json, size_t len) {
 enum class UserRole { Unknown, User, Agent, Vault, Subaccount, Missing };
 
 /// Parse userRole response to determine wallet role.
-/// Input is a JSON string like "\"User\"", "\"Agent\"", etc.
-/// The response body contains the role type.
+/// API returns {"role":"<value>"} with lowercase/camelCase values.
+/// Order matters: "agent" data contains "user", so check "agent" first.
 UserRole parseUserRole(const char* responseBody) {
     if (!responseBody || !*responseBody) return UserRole::Unknown;
 
     std::string body(responseBody);
-    if (body.find("Agent") != std::string::npos) return UserRole::Agent;
-    if (body.find("Subaccount") != std::string::npos) return UserRole::Subaccount;
-    if (body.find("Vault") != std::string::npos) return UserRole::Vault;
-    if (body.find("Missing") != std::string::npos) return UserRole::Missing;
-    if (body.find("User") != std::string::npos) return UserRole::User;
+    if (body.find("agent") != std::string::npos) return UserRole::Agent;
+    if (body.find("subAccount") != std::string::npos) return UserRole::Subaccount;
+    if (body.find("vault") != std::string::npos) return UserRole::Vault;
+    if (body.find("missing") != std::string::npos) return UserRole::Missing;
+    if (body.find("user") != std::string::npos) return UserRole::User;
     return UserRole::Unknown;
 }
 
@@ -269,27 +269,27 @@ TEST_CASE(spot_balance_large_amount) {
 //=============================================================================
 
 TEST_CASE(user_role_user) {
-    ASSERT_EQ((int)AcctHttp::parseUserRole("\"User\""), (int)AcctHttp::UserRole::User);
+    ASSERT_EQ((int)AcctHttp::parseUserRole("{\"role\":\"user\"}"), (int)AcctHttp::UserRole::User);
 }
 
 TEST_CASE(user_role_agent) {
-    ASSERT_EQ((int)AcctHttp::parseUserRole("\"Agent\""), (int)AcctHttp::UserRole::Agent);
+    ASSERT_EQ((int)AcctHttp::parseUserRole("{\"role\":\"agent\",\"data\":{\"user\":\"0xabc\"}}"), (int)AcctHttp::UserRole::Agent);
 }
 
 TEST_CASE(user_role_vault) {
-    ASSERT_EQ((int)AcctHttp::parseUserRole("\"Vault\""), (int)AcctHttp::UserRole::Vault);
+    ASSERT_EQ((int)AcctHttp::parseUserRole("{\"role\":\"vault\"}"), (int)AcctHttp::UserRole::Vault);
 }
 
 TEST_CASE(user_role_subaccount) {
-    ASSERT_EQ((int)AcctHttp::parseUserRole("\"Subaccount\""), (int)AcctHttp::UserRole::Subaccount);
+    ASSERT_EQ((int)AcctHttp::parseUserRole("{\"role\":\"subAccount\",\"data\":{\"master\":\"0xdef\"}}"), (int)AcctHttp::UserRole::Subaccount);
 }
 
 TEST_CASE(user_role_missing) {
-    ASSERT_EQ((int)AcctHttp::parseUserRole("\"Missing\""), (int)AcctHttp::UserRole::Missing);
+    ASSERT_EQ((int)AcctHttp::parseUserRole("{\"role\":\"missing\"}"), (int)AcctHttp::UserRole::Missing);
 }
 
 TEST_CASE(user_role_unknown_string) {
-    ASSERT_EQ((int)AcctHttp::parseUserRole("\"SomethingElse\""), (int)AcctHttp::UserRole::Unknown);
+    ASSERT_EQ((int)AcctHttp::parseUserRole("{\"role\":\"somethingElse\"}"), (int)AcctHttp::UserRole::Unknown);
 }
 
 TEST_CASE(user_role_empty) {
@@ -300,9 +300,9 @@ TEST_CASE(user_role_null) {
     ASSERT_EQ((int)AcctHttp::parseUserRole(nullptr), (int)AcctHttp::UserRole::Unknown);
 }
 
-TEST_CASE(user_role_json_object) {
-    // Some API versions might return JSON object
-    ASSERT_EQ((int)AcctHttp::parseUserRole("{\"role\":\"Agent\"}"), (int)AcctHttp::UserRole::Agent);
+TEST_CASE(user_role_agent_contains_user) {
+    // "agent" response data contains "user" key — must detect as Agent, not User
+    ASSERT_EQ((int)AcctHttp::parseUserRole("{\"role\":\"agent\",\"data\":{\"user\":\"0xabc\"}}"), (int)AcctHttp::UserRole::Agent);
 }
 
 //=============================================================================
@@ -503,7 +503,7 @@ int main() {
     RUN_TEST(user_role_unknown_string);
     RUN_TEST(user_role_empty);
     RUN_TEST(user_role_null);
-    RUN_TEST(user_role_json_object);
+    RUN_TEST(user_role_agent_contains_user);
 
     // orderStatus three-state parsing
     RUN_TEST(order_status_unknown_oid);
