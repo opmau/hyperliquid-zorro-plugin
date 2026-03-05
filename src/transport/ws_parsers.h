@@ -44,8 +44,10 @@ OrderResponse parsePostResponse(const char* json, int diagLevel, LogCallback log
 /// Parse clearinghouseState subscription message
 /// Populates positions and account data in cache
 /// Format: {"channel":"clearinghouseState","data":{"assetPositions":[...],"marginSummary":{...}}}
+/// @param dex PerpDex name ("" = main dex). Only clears positions from this dex. [OPM-212]
 void parseClearinghouseState(PriceCache& cache, const char* json,
-                             int diagLevel, LogCallback logCb);
+                             int diagLevel, LogCallback logCb,
+                             const char* dex = "");
 
 /// Parse openOrders subscription message
 /// Replaces all open orders in cache (full snapshot)
