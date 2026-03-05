@@ -220,7 +220,20 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
 
     if (pFill) *pFill = (result.filledSize > 0 && hl::g_trading.lotSize > 0)
         ? (int)round(result.filledSize / hl::g_trading.lotSize) : abs(amount);
-    if (pClose) *pClose = result.avgPrice > 0 ? result.avgPrice : request.limitPrice;
+
+    double closePx = result.avgPrice > 0 ? result.avgPrice : request.limitPrice;
+    if (pClose) *pClose = closePx;
+
+    // pCost: Hyperliquid perps have no rollover/swap fees, so always 0 [OPM-215]
+    // (pCost was initialized to 0 above — intentionally unchanged)
+
+    // pProfit: P&L from entry price vs close fill price [OPM-215]
+    if (pProfit && state.avgPrice > 0 && closePx > 0) {
+        double fillSz = (result.filledSize > 0) ? result.filledSize : closeSize;
+        double pnl = (closePx - state.avgPrice) * fillSz;
+        if (state.side == hl::OrderSide::Sell) pnl = -pnl;  // Short: invert
+        *pProfit = pnl;
+    }
 
     // Bridge fill → position cache so GET_POSITION sees it immediately [OPM-85]
     double closeFillSize = (result.filledSize > 0) ? result.filledSize : closeSize;
