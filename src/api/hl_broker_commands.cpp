@@ -33,9 +33,9 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
     //=========================================================================
 
     case GET_COMPLIANCE:
-        // 2 = no hedging (one position per asset)
-        // 8 = no direct trade close (use NFA-style opposite order)
-        return 2 + 8;
+        // Return 0: let Accounts.csv NFA column control compliance [OPM-213]
+        // Previously hardcoded 2+8 which overrode user settings
+        return 0;
 
     case GET_MAXREQUESTS:
         return 5;  // Max concurrent HTTP requests
@@ -592,7 +592,7 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
 #endif
 
         fprintf(f, "Name,Server,AccountId,User,Pass,Assets,CCY,Real,NFA,Plugin\n");
-        fprintf(f, "%s,%s,%s,%s,%s,AssetsHyperliquid,USD,%d,0,%s\n",
+        fprintf(f, "%s,%s,%s,%s,%s,AssetsHyperliquid,USD,%d,2,%s\n",
                 PLUGIN_NAME,
                 hl::g_config.baseUrl[0] ? hl::g_config.baseUrl : "https://api.hyperliquid.xyz",
                 hl::g_config.walletAddress[0] ? hl::g_config.walletAddress : "0",
