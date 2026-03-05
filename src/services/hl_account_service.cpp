@@ -306,37 +306,32 @@ static bool ensurePositionData() {
 
     auto* cache = reinterpret_cast<hl::ws::PriceCache*>(g_priceCache);
     DWORD posAge = cache->getPositionsAge();
+    bool hasMainDexData = (posAge != MAXDWORD);
 
-    // If we have a position snapshot (even if empty), no fallback needed
-    if (posAge != MAXDWORD) {
-        // [OPM-218] Subscribe to perpDex WS channels (dynamic discovery).
-        // Assets may have been loaded after WS connect — subscribe now.
-        subscribePerpDexChannels();
+    // [OPM-219] PerpDex position fetching is decoupled from main-dex gate.
+    // Subaccounts that only trade on perpDex may have empty main-dex data,
+    // so perpDex positions must be fetched independently.
+    subscribePerpDexChannels();
+    if (!s_perpDexPositionsFetched) {
+        refreshPerpDexPositions();
+    }
 
-        // [OPM-212] HTTP fallback: fetch perpDex positions once for initial data.
-        // WS subscriptions will provide real-time updates after this.
-        if (!s_perpDexPositionsFetched) {
-            refreshPerpDexPositions();
-        }
+    if (hasMainDexData) {
         return true;
     }
 
-    // No position snapshot received — rate-limited HTTP fallback
+    // No main-dex position snapshot — rate-limited HTTP fallback
     static DWORD lastAttempt = 0;
     DWORD now = GetTickCount();
     DWORD elapsed = (now >= lastAttempt) ? (now - lastAttempt) : MAXDWORD;
     if (elapsed < config::POSITION_CACHE_MS) {
-        return false;  // Too soon since last HTTP attempt
+        return s_perpDexPositionsFetched;  // Have perpDex data at least
     }
 
     logMsg(1, "ensurePositionData", "No WS position data, HTTP fallback");
     lastAttempt = GetTickCount();
     bool ok = refreshBalance();
-    // [OPM-212] Also fetch perpDex positions on first HTTP fallback
-    if (ok && !s_perpDexPositionsFetched) {
-        refreshPerpDexPositions();
-    }
-    return ok;
+    return ok || s_perpDexPositionsFetched;
 }
 
 PositionInfo getPosition(const char* coin) {
@@ -350,6 +345,25 @@ PositionInfo getPosition(const char* coin) {
     if (g_priceCache) {
         auto* cache = reinterpret_cast<hl::ws::PriceCache*>(g_priceCache);
         ws::PositionData wsPos = cache->getPosition(std::string(coin));
+
+        // [OPM-219] Fallback: "dex:COIN" didn't match, try bare coin
+        if (wsPos.size == 0 && strchr(coin, ':')) {
+            std::string bareCoin(strchr(coin, ':') + 1);
+            wsPos = cache->getPosition(bareCoin);
+        }
+
+        // [OPM-219] Fallback: bare "COIN" didn't match, try "dex:COIN"
+        if (wsPos.size == 0 && !strchr(coin, ':')) {
+            for (int i = 0; i < g_assets.count; ++i) {
+                const AssetInfo* a = g_assets.getByIndex(i);
+                if (a && a->isPerpDex && a->perpDex[0]
+                    && _stricmp(a->coin, coin) == 0) {
+                    std::string prefixed = std::string(a->perpDex) + ":" + coin;
+                    wsPos = cache->getPosition(prefixed);
+                    break;
+                }
+            }
+        }
 
         if (wsPos.size != 0) {
             result.coin = wsPos.coin;
