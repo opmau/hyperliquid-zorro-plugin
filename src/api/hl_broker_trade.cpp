@@ -96,6 +96,19 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
             double basePrice = (volume > 0) ? price.ask : price.bid;
 
             if (basePrice <= 0) {
+                // [OPM-227] Close with no price: check if position is already flat
+                if (isCloseOrder) {
+                    hl::account::PositionInfo pos = hl::account::getPosition(coinForApi.c_str());
+                    DWORD posAge = hl::account::getPositionsAge();
+                    if (!pos.isOpen() && posAge != MAXDWORD) {
+                        hl::g_logger.logf(1, "BrokerBuy2: CLOSE - no price but %s is flat (age %ums) [OPM-227]",
+                                          coinForApi.c_str(), posAge);
+                        int earlyTradeId = hl::trading::generateTradeId();
+                        if (pFill) *pFill = abs(volume);
+                        if (pPrice) *pPrice = 0;
+                        return earlyTradeId;
+                    }
+                }
                 hl::g_logger.log(1, "BrokerBuy2: No price available");
                 return 0;
             }
@@ -115,10 +128,40 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
     // Generate trade ID before placing order
     int tradeId = hl::trading::generateTradeId();
 
+    // [OPM-227] Close order: verify exchange has a position before reduce-only order.
+    // With NFA mode, Zorro closes via BrokerBuy2(StopDist=-1). If the position was
+    // already closed (externally, liquidation, or entry never filled), the reduce-only
+    // order would be rejected → Error 075. Pre-check avoids this.
+    if (isCloseOrder) {
+        hl::account::PositionInfo pos = hl::account::getPosition(coinForApi.c_str());
+        DWORD posAge = hl::account::getPositionsAge();
+        if (!pos.isOpen() && posAge != MAXDWORD) {
+            hl::g_logger.logf(1, "BrokerBuy2: CLOSE - %s has no position (data age %ums), "
+                              "already flat [OPM-227]", coinForApi.c_str(), posAge);
+            if (pFill) *pFill = abs(volume);
+            if (pPrice) *pPrice = 0;
+            return tradeId;
+        }
+    }
+
     // Place order via trading service with explicit trade ID
     hl::OrderResult result = hl::trading::placeOrderWithId(request, tradeId);
 
     if (!result.success) {
+        // [OPM-227] Close rejected — position may have been closed externally
+        // between pre-check and order submission (race), or pre-check was skipped
+        // because position data was unavailable at that time.
+        if (isCloseOrder) {
+            hl::account::PositionInfo pos = hl::account::getPosition(coinForApi.c_str());
+            DWORD posAge = hl::account::getPositionsAge();
+            if (!pos.isOpen() && posAge != MAXDWORD) {
+                hl::g_logger.logf(1, "BrokerBuy2: CLOSE rejected but %s is flat (age %ums) "
+                                  "— reporting success [OPM-227]", coinForApi.c_str(), posAge);
+                if (pFill) *pFill = abs(volume);
+                if (pPrice) *pPrice = 0;
+                return tradeId;
+            }
+        }
         if (hl::g_config.diagLevel >= 1) {
             hl::g_logger.logf(1, "BrokerBuy2: Order failed - %s", result.error.c_str());
         }
@@ -173,6 +216,25 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
         return 0;
     }
 
+    // [OPM-227] Verify exchange has position before submitting reduce-only close.
+    // If position was already closed (externally, liquidation, entry never filled),
+    // report success so Zorro removes the phantom trade instead of retrying Error 075.
+    {
+        hl::account::PositionInfo pos = hl::account::getPosition(state.coin);
+        DWORD posAge = hl::account::getPositionsAge();
+        if (!pos.isOpen() && posAge != MAXDWORD) {
+            hl::g_logger.logf(1, "BrokerSell2: No position for %s (data age %ums), "
+                              "already flat [OPM-227]", state.coin, posAge);
+            if (pClose) {
+                hl::PriceData price = hl::market::getPrice(state.coin);
+                *pClose = price.mid > 0 ? price.mid : state.avgPrice;
+            }
+            if (pProfit) *pProfit = 0;
+            if (pFill) *pFill = abs(amount);
+            return tradeId;
+        }
+    }
+
     // Place opposite order to close
     double closeSize = fabs((double)amount) * hl::g_trading.lotSize;
     // Opposite direction: if original was Buy, close with Sell
@@ -214,6 +276,21 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
     hl::OrderResult result = hl::trading::placeOrder(request);
 
     if (!result.success) {
+        // [OPM-227] Close rejected — re-check position (may have been closed
+        // between pre-check and order submission)
+        hl::account::PositionInfo pos = hl::account::getPosition(state.coin);
+        DWORD posAge = hl::account::getPositionsAge();
+        if (!pos.isOpen() && posAge != MAXDWORD) {
+            hl::g_logger.logf(1, "BrokerSell2: Close rejected but %s is flat (age %ums) "
+                              "— reporting success [OPM-227]", state.coin, posAge);
+            if (pClose) {
+                hl::PriceData price = hl::market::getPrice(state.coin);
+                *pClose = price.mid > 0 ? price.mid : state.avgPrice;
+            }
+            if (pProfit) *pProfit = 0;
+            if (pFill) *pFill = abs(amount);
+            return tradeId;
+        }
         hl::g_logger.logf(1, "BrokerSell2: Close failed - %s", result.error.c_str());
         return 0;
     }
