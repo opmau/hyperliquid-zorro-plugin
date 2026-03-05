@@ -107,6 +107,58 @@ TEST_CASE(l2book_malformed_json) {
     ASSERT_FALSE(r.valid);
 }
 
+// perpDex l2Book tests [OPM-217]
+TEST_CASE(l2book_perpdex_ws_message) {
+    // HL returns "coin":"xyz:XYZ100" for perpDex assets in l2Book responses
+    const char* json = R"({
+        "channel":"l2Book",
+        "data":{
+            "coin":"xyz:XYZ100",
+            "levels":[
+                [{"px":"42.50","sz":"100.0","n":5}],
+                [{"px":"42.75","sz":"80.0","n":3}]
+            ]
+        }
+    })";
+    auto r = hl::ws::parseL2Book(json, 0, nullptr);
+    ASSERT_TRUE(r.valid);
+    ASSERT_STREQ(r.coin, "xyz:XYZ100");
+    ASSERT_FLOAT_EQ_TOL(r.bid, 42.50, 0.01);
+    ASSERT_FLOAT_EQ_TOL(r.ask, 42.75, 0.01);
+}
+
+TEST_CASE(l2book_perpdex_cache_roundtrip) {
+    // Verify perpDex coin stores and retrieves correctly in PriceCache
+    hl::ws::PriceCache cache;
+
+    // Parse l2Book for perpDex asset
+    const char* json = R"({
+        "channel":"l2Book",
+        "data":{
+            "coin":"xyz:XYZ100",
+            "levels":[
+                [{"px":"42.50","sz":"100.0"}],
+                [{"px":"42.75","sz":"80.0"}]
+            ]
+        }
+    })";
+    auto r = hl::ws::parseL2Book(json, 0, nullptr);
+    ASSERT_TRUE(r.valid);
+
+    // Store in cache using the same key the subscription would use
+    cache.setBidAsk(r.coin, r.bid, r.ask);
+
+    // Retrieve using the same key getPrice/getPerpDexPrice would use
+    double bid = cache.getBid("xyz:XYZ100");
+    double ask = cache.getAsk("xyz:XYZ100");
+    ASSERT_FLOAT_EQ_TOL(bid, 42.50, 0.01);
+    ASSERT_FLOAT_EQ_TOL(ask, 42.75, 0.01);
+
+    // Verify standard perp "BTC" is independent (no cross-contamination)
+    double btcBid = cache.getBid("BTC");
+    ASSERT_FLOAT_EQ_TOL(btcBid, 0.0, 0.01);
+}
+
 //=============================================================================
 // parsePostResponse TESTS
 //=============================================================================
@@ -538,6 +590,8 @@ int main() {
     RUN_TEST(l2book_missing_coin);
     RUN_TEST(l2book_empty_levels);
     RUN_TEST(l2book_malformed_json);
+    RUN_TEST(l2book_perpdex_ws_message);
+    RUN_TEST(l2book_perpdex_cache_roundtrip);
 
     // parsePostResponse
     RUN_TEST(post_response_filled);
