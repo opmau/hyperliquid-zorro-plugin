@@ -245,11 +245,14 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         const char* symbol = (const char*)parameter;
         if (!symbol || !*symbol) return 0;
 
-        char coin[64];
-        strncpy_s(coin, symbol, _TRUNCATE);
-        hl::utils::normalizeCoin(coin, coin, sizeof(coin));
+        // Use same symbol→coin conversion as BrokerAsset [OPM-203]
+        // normalizeCoin only strips after '-', but perpDex assets need
+        // parsePerpDex + buildCoinForApi to match the cache key.
+        char perpDex[32], coin[64];
+        parsePerpDex(symbol, perpDex, sizeof(perpDex), coin, sizeof(coin));
+        std::string coinForApi = buildCoinForApi(perpDex, coin);
 
-        double posSize = hl::account::getPositionSize(coin);
+        double posSize = hl::account::getPositionSize(coinForApi.c_str());
         return posSize;
     }
 
