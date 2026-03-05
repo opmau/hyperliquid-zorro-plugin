@@ -277,7 +277,7 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
             t->nID = hl::trading::generateTradeId();
 
             const hl::AssetInfo* asset = hl::market::getAsset(pos.coin.c_str());
-            double lotAmount = asset ? pow(10.0, -asset->szDecimals) : 1.0;
+            double lotAmount = asset ? asset->minSize : 1.0;  // [OPM-198] use pre-calculated
 
             t->nLots = (int)round(fabs(pos.size) / lotAmount);
             if (t->nLots < 1) t->nLots = 1;
@@ -499,17 +499,10 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
             if (px.mid <= 0) continue;
 
             const hl::AssetInfo* asset = hl::market::getAsset(coins[i]);
-            double pip, lotAmt;
-            int lev;
-            if (asset) {
-                pip = pow(10.0, -asset->pxDecimals);
-                lotAmt = pow(10.0, -asset->szDecimals);
-                lev = asset->maxLeverage;
-            } else {
-                pip = (px.mid >= 1000.0) ? 0.5 : 0.01;
-                lotAmt = 1.0;
-                lev = 1;
-            }
+            if (!asset) continue;  // [OPM-198] skip assets without metadata
+            double pip = asset->tickSize;
+            double lotAmt = asset->minSize;
+            int lev = asset->maxLeverage;
             double pipCost = pip * lotAmt;  // 10^(-6) for perps, 10^(-8) for spot [OPM-141]
             double spread = (px.ask > 0 && px.bid > 0) ? (px.ask - px.bid) : 0.0;
 
@@ -553,8 +546,8 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
                 }
             }
 
-            double pip = pow(10.0, -asset->pxDecimals);
-            double lotAmt = pow(10.0, -asset->szDecimals);
+            double pip = asset->tickSize;       // [OPM-198] use pre-calculated
+            double lotAmt = asset->minSize;
             double pipCost = pip * lotAmt;  // 10^(-6) for perps, 10^(-8) for spot [OPM-141]
 
             fprintf(f, "%s,%.8f,%.8f,0,0,%.8f,%.8f,0,%d,%.8f,-0.035\n",
