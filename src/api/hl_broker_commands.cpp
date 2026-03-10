@@ -33,9 +33,9 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
     //=========================================================================
 
     case GET_COMPLIANCE:
-        // 2 = no hedging (one position per asset)
-        // 8 = no direct trade close (use NFA-style opposite order)
-        return 2 + 8;
+        // Return 0: let Accounts.csv NFA column control compliance [OPM-213]
+        // Previously hardcoded 2+8 which overrode user settings
+        return 0;
 
     case GET_MAXREQUESTS:
         return 5;  // Max concurrent HTTP requests
@@ -245,11 +245,14 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         const char* symbol = (const char*)parameter;
         if (!symbol || !*symbol) return 0;
 
-        char coin[64];
-        strncpy_s(coin, symbol, _TRUNCATE);
-        hl::utils::normalizeCoin(coin, coin, sizeof(coin));
+        // Use same symbol→coin conversion as BrokerAsset [OPM-203]
+        // normalizeCoin only strips after '-', but perpDex assets need
+        // parsePerpDex + buildCoinForApi to match the cache key.
+        char perpDex[32], coin[64];
+        parsePerpDex(symbol, perpDex, sizeof(perpDex), coin, sizeof(coin));
+        std::string coinForApi = buildCoinForApi(perpDex, coin);
 
-        double posSize = hl::account::getPositionSize(coin);
+        double posSize = hl::account::getPositionSize(coinForApi.c_str());
         return posSize;
     }
 
@@ -277,7 +280,7 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
             t->nID = hl::trading::generateTradeId();
 
             const hl::AssetInfo* asset = hl::market::getAsset(pos.coin.c_str());
-            double lotAmount = asset ? pow(10.0, -asset->szDecimals) : 1.0;
+            double lotAmount = asset ? asset->minSize : 1.0;  // [OPM-198] use pre-calculated
 
             t->nLots = (int)round(fabs(pos.size) / lotAmount);
             if (t->nLots < 1) t->nLots = 1;
@@ -418,9 +421,16 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         int mode = (int)parameter;
         if (mode < 0 || mode > 1) return 0;
         hl::g_config.accountMode = mode;
+        // [OPM-202] When vault mode enabled, use walletAddress as vaultAddress
+        if (mode == 1 && !hl::g_config.vaultAddress[0]) {
+            strncpy_s(hl::g_config.vaultAddress, hl::g_config.walletAddress, _TRUNCATE);
+        } else if (mode == 0) {
+            hl::g_config.vaultAddress[0] = '\0';
+        }
         if (hl::g_config.diagLevel >= 1) {
-            hl::g_logger.logf(1, "Account mode: %d (%s)",
-                              mode, mode == 0 ? "API wallet" : "vault");
+            hl::g_logger.logf(1, "Account mode: %d (%s) vaultAddress=%s",
+                              mode, mode == 0 ? "API wallet" : "vault",
+                              hl::g_config.vaultAddress[0] ? hl::g_config.vaultAddress : "(none)");
         }
         return 1;
     }
@@ -448,14 +458,19 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
 
     case HL_GET_FUNDING_RATE: {
         // Return current hourly funding rate for a coin [OPM-172]
-        // Parameter: string coin name, or 0 to use current symbol
+        // Parameter: string coin name (recommended), or 0 to use currentSymbol
+        // currentSymbol is set by BrokerAsset price queries (from asset() calls)
         const char* coin = nullptr;
         if (parameter != 0) {
             coin = (const char*)parameter;
         } else {
             coin = hl::g_trading.currentSymbol;
         }
-        if (!coin || !*coin) return 0.0;
+        if (!coin || !*coin) {
+            hl::g_logger.log(1, "HL_GET_FUNDING_RATE: no coin — pass coin name as parameter "
+                                "or call asset() first [OPM-197]");
+            return 0.0;
+        }
         return hl::market::getFundingRate(coin);
     }
 
@@ -499,17 +514,10 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
             if (px.mid <= 0) continue;
 
             const hl::AssetInfo* asset = hl::market::getAsset(coins[i]);
-            double pip, lotAmt;
-            int lev;
-            if (asset) {
-                pip = pow(10.0, -asset->pxDecimals);
-                lotAmt = pow(10.0, -asset->szDecimals);
-                lev = asset->maxLeverage;
-            } else {
-                pip = (px.mid >= 1000.0) ? 0.5 : 0.01;
-                lotAmt = 1.0;
-                lev = 1;
-            }
+            if (!asset) continue;  // [OPM-198] skip assets without metadata
+            double pip = asset->tickSize;
+            double lotAmt = asset->minSize;
+            int lev = asset->maxLeverage;
             double pipCost = pip * lotAmt;  // 10^(-6) for perps, 10^(-8) for spot [OPM-141]
             double spread = (px.ask > 0 && px.bid > 0) ? (px.ask - px.bid) : 0.0;
 
@@ -553,8 +561,8 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
                 }
             }
 
-            double pip = pow(10.0, -asset->pxDecimals);
-            double lotAmt = pow(10.0, -asset->szDecimals);
+            double pip = asset->tickSize;       // [OPM-198] use pre-calculated
+            double lotAmt = asset->minSize;
             double pipCost = pip * lotAmt;  // 10^(-6) for perps, 10^(-8) for spot [OPM-141]
 
             fprintf(f, "%s,%.8f,%.8f,0,0,%.8f,%.8f,0,%d,%.8f,-0.035\n",
@@ -584,7 +592,7 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
 #endif
 
         fprintf(f, "Name,Server,AccountId,User,Pass,Assets,CCY,Real,NFA,Plugin\n");
-        fprintf(f, "%s,%s,%s,%s,%s,AssetsHyperliquid,USD,%d,0,%s\n",
+        fprintf(f, "%s,%s,%s,%s,%s,AssetsHyperliquid,USD,%d,2,%s\n",
                 PLUGIN_NAME,
                 hl::g_config.baseUrl[0] ? hl::g_config.baseUrl : "https://api.hyperliquid.xyz",
                 hl::g_config.walletAddress[0] ? hl::g_config.walletAddress : "0",

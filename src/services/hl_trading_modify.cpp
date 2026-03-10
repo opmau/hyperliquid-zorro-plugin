@@ -104,11 +104,12 @@ ModifyResult modifyOrder(const ModifyRequest& request) {
     }
 
     // === STEP 1: Pack action with msgpack ===
+    int apiAssetId = meta::getApiAssetId(assetIndex);  // [OPM-191]
     eip712::ByteArray packedAction = msgpack::packBatchModifyAction(
         request.oid,
         request.oidCloid,
         request.useCloid,
-        assetIndex,
+        apiAssetId,
         (request.side == OrderSide::Buy),
         priceStr,
         sizeStr,
@@ -120,8 +121,9 @@ ModifyResult modifyOrder(const ModifyRequest& request) {
     // === STEP 2: Hash with EIP-712 for signing ===
     uint64_t nonce = generateNonce();
     bool isMainnet = !g_config.isTestnet;
+    std::string vault(g_config.vaultAddress);  // [OPM-202]
     eip712::ByteArray msgHash = eip712::hashBatchModifyForSigning(
-        packedAction, isMainnet, nonce, "");
+        packedAction, isMainnet, nonce, vault);
 
     if (msgHash.empty() || msgHash.size() != 32) {
         result.error = "Failed to generate EIP-712 message hash for modify";
@@ -151,6 +153,14 @@ ModifyResult modifyOrder(const ModifyRequest& request) {
         sprintf_s(cloidField, ",\"c\":\"%s\"", request.cloid.c_str());
     }
 
+    // [OPM-202] Format vaultAddress for JSON payload
+    char vaultJson[128];
+    if (vault.empty()) {
+        strcpy_s(vaultJson, "null");
+    } else {
+        sprintf_s(vaultJson, "\"%s\"", vault.c_str());
+    }
+
     char modifyJson[2048];
     sprintf_s(modifyJson, sizeof(modifyJson),
         "{"
@@ -171,11 +181,11 @@ ModifyResult modifyOrder(const ModifyRequest& request) {
             "},"
             "\"nonce\":%llu,"
             "\"signature\":%s,"
-            "\"vaultAddress\":null,"
+            "\"vaultAddress\":%s,"
             "\"expiresAfter\":null"
         "}",
         oidJson,
-        assetIndex,
+        apiAssetId,  // API asset ID, not registry index [OPM-191]
         (request.side == OrderSide::Buy) ? "true" : "false",
         priceStr.c_str(),
         sizeStr.c_str(),
@@ -183,7 +193,8 @@ ModifyResult modifyOrder(const ModifyRequest& request) {
         tif.c_str(),
         cloidField,
         (unsigned long long)nonce,
-        sig.toJson().c_str()
+        sig.toJson().c_str(),
+        vaultJson
     );
 
     if (g_config.diagLevel >= 2) {

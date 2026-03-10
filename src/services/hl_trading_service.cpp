@@ -283,7 +283,7 @@ OrderResult placeOrderWithId(const OrderRequest& request, int tradeId) {
     const AssetInfo* assetInfo = g_assets.getByIndex(assetIndex);
 
     eip712::OrderAction orderAction;
-    orderAction.asset = assetIndex;
+    orderAction.asset = meta::getApiAssetId(assetIndex);
     orderAction.isBuy = (request.side == OrderSide::Buy);
 
     // Round price per Hyperliquid rules: 5 sig figs + max decimal places [OPM-76]
@@ -319,8 +319,9 @@ OrderResult placeOrderWithId(const OrderRequest& request, int tradeId) {
     // STEP 2: Hash with EIP-712 for signing
     uint64_t nonce = generateNonce();
     bool isMainnet = !g_config.isTestnet;
+    std::string vault(g_config.vaultAddress);  // [OPM-202]
     eip712::ByteArray msgHash = eip712::hashOrderForSigning(
-        orderAction, isMainnet, nonce, "");
+        orderAction, isMainnet, nonce, vault);
 
     if (msgHash.empty() || msgHash.size() != 32) {
         result.error = "Failed to generate EIP-712 message hash";
@@ -353,6 +354,14 @@ OrderResult placeOrderWithId(const OrderRequest& request, int tradeId) {
         );
     }
 
+    // [OPM-202] Format vaultAddress for JSON payload
+    char vaultJson[128];
+    if (vault.empty()) {
+        strcpy_s(vaultJson, "null");
+    } else {
+        sprintf_s(vaultJson, "\"%s\"", vault.c_str());
+    }
+
     char orderJson[2048];
     sprintf_s(orderJson, sizeof(orderJson),
         "{"
@@ -371,10 +380,10 @@ OrderResult placeOrderWithId(const OrderRequest& request, int tradeId) {
             "},"
             "\"nonce\":%llu,"
             "\"signature\":%s,"
-            "\"vaultAddress\":null,"
+            "\"vaultAddress\":%s,"
             "\"expiresAfter\":null"
         "}",
-        assetIndex,
+        orderAction.asset,  // API asset ID, not registry index [OPM-191]
         orderAction.isBuy ? "true" : "false",
         orderAction.price.c_str(),
         orderAction.size.c_str(),
@@ -382,7 +391,8 @@ OrderResult placeOrderWithId(const OrderRequest& request, int tradeId) {
         tField,
         cloid,
         nonce,
-        sig.toJson().c_str()
+        sig.toJson().c_str(),
+        vaultJson
     );
 
     {

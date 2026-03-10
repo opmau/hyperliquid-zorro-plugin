@@ -124,28 +124,21 @@ void test_get_price_both_empty_returns_zero() {
 }
 
 void test_broker_asset_must_not_set_current_symbol() {
-    // After fix: BrokerAsset price queries should NOT modify currentSymbol.
-    // This test verifies the invariant by simulating the BrokerAsset sequence.
+    // Key invariant: GET_PRICE only uses priceSymbol (set by SET_SYMBOL).
+    // Even though BrokerAsset now sets currentSymbol again [OPM-197],
+    // GET_PRICE must NOT fall back to currentSymbol — that was the OPM-6 bug.
     //
-    // We can't call BrokerAsset directly (too many deps), but we verify
-    // that currentSymbol stays empty after being explicitly cleared.
-    // The real enforcement is in the source code change.
+    // This test verifies: without SET_SYMBOL, GET_PRICE returns 0,
+    // regardless of what currentSymbol contains.
 
     // Clear context
     hl::g_trading.currentSymbol[0] = '\0';
     hl::g_trading.priceSymbol[0] = '\0';
 
-    // Simulate: "BrokerAsset for BTC set currentSymbol" is the BUG
-    // After fix, BrokerAsset won't set currentSymbol at all.
-    // This test documents the EXPECTED invariant:
-    // currentSymbol should remain empty unless SET_SYMBOL is called.
-
-    // Note: The actual enforcement is that hl_broker_market.cpp line 89
-    // is removed. This test catches the regression via simulateGetPrice.
     hl::ws::PriceCache cache;
     cache.setBidAsk("SOL", 83.5, 83.6);
 
-    // If currentSymbol were still set by BrokerAsset, this would return SOL data
+    // Even if currentSymbol were set (e.g., by BrokerAsset), GET_PRICE ignores it
     GetPriceResult r = simulateGetPrice(cache);
     ASSERT_NULL(r.lookupCoin);
 }

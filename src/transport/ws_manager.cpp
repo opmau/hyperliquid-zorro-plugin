@@ -329,6 +329,24 @@ void WebSocketManager::subscribeClearinghouseState() {
     LeaveCriticalSection(&accountSubCs_);
 }
 
+void WebSocketManager::subscribeClearinghouseStateDex(const std::string& dex) {
+    if (userAddress_.empty() || dex.empty()) return;
+    EnterCriticalSection(&accountSubCs_);
+    // Already subscribed or pending?
+    if (subscribedClearinghouseDexes_.count(dex)) {
+        LeaveCriticalSection(&accountSubCs_);
+        return;
+    }
+    for (const auto& d : pendingClearinghouseDexSubs_) {
+        if (d == dex) { LeaveCriticalSection(&accountSubCs_); return; }
+    }
+    pendingClearinghouseDexSubs_.push_back(dex);
+    LeaveCriticalSection(&accountSubCs_);
+
+    if (diagLevel_ >= 1)
+        logf(1, "WS: Queued clearinghouseState subscription for dex=%s", dex.c_str());
+}
+
 void WebSocketManager::subscribeOpenOrders() {
     if (userAddress_.empty()) return;
     EnterCriticalSection(&accountSubCs_);
@@ -385,6 +403,9 @@ void WebSocketManager::sendPendingAccountSubscriptions() {
     bool sendClearing = pendingClearinghouseSub_;
     bool sendOrders = pendingOpenOrdersSub_;
     pendingUserFillsSub_ = pendingClearinghouseSub_ = pendingOpenOrdersSub_ = false;
+    // [OPM-218] Snapshot perpDex pending subs under same lock
+    std::vector<std::string> dexSubs;
+    dexSubs.swap(pendingClearinghouseDexSubs_);
     LeaveCriticalSection(&accountSubCs_);
 
     if ((sendFills || sendClearing || sendOrders) && diagLevel_ >= 2) {
@@ -409,6 +430,26 @@ void WebSocketManager::sendPendingAccountSubscriptions() {
         sprintf_s(sub, "{\"method\":\"subscribe\",\"subscription\":"
                  "{\"type\":\"openOrders\",\"user\":\"%s\"}}", userAddress_.c_str());
         if (connection_.send(sub)) subscribedOpenOrders_ = true;
+    }
+
+    // [OPM-218] Send perpDex clearinghouseState subscriptions
+    for (const auto& dex : dexSubs) {
+        char sub[512];
+        sprintf_s(sub, "{\"method\":\"subscribe\",\"subscription\":"
+                 "{\"type\":\"clearinghouseState\",\"user\":\"%s\",\"dex\":\"%s\"}}",
+                 userAddress_.c_str(), dex.c_str());
+        if (connection_.send(sub)) {
+            EnterCriticalSection(&accountSubCs_);
+            subscribedClearinghouseDexes_.insert(dex);
+            LeaveCriticalSection(&accountSubCs_);
+            logf(1, "WS: Subscribed clearinghouseState dex=%s", dex.c_str());
+        } else {
+            // Re-queue for retry
+            EnterCriticalSection(&accountSubCs_);
+            pendingClearinghouseDexSubs_.push_back(dex);
+            LeaveCriticalSection(&accountSubCs_);
+            logf(1, "WS: Failed to send clearinghouseState sub for dex=%s, re-queued", dex.c_str());
+        }
     }
 }
 
@@ -468,6 +509,10 @@ void WebSocketManager::requeueSubscriptionsAfterReconnect() {
     if (subscribedUserFills_) { pendingUserFillsSub_ = true; subscribedUserFills_ = false; }
     if (subscribedClearinghouse_) { pendingClearinghouseSub_ = true; subscribedClearinghouse_ = false; }
     if (subscribedOpenOrders_) { pendingOpenOrdersSub_ = true; subscribedOpenOrders_ = false; }
+    // [OPM-218] Requeue perpDex clearinghouseState subscriptions
+    for (const auto& dex : subscribedClearinghouseDexes_)
+        pendingClearinghouseDexSubs_.push_back(dex);
+    subscribedClearinghouseDexes_.clear();
     LeaveCriticalSection(&accountSubCs_);
 }
 
@@ -605,7 +650,54 @@ void WebSocketManager::parseL2Book(const char* json) {
 }
 
 void WebSocketManager::parseClearinghouseState(const char* json) {
-    hl::ws::parseClearinghouseState(cache_, json, diagLevel_, logCallback_);
+    // [OPM-218] If perpDex subscriptions exist, infer dex from coin names
+    EnterCriticalSection(&accountSubCs_);
+    bool hasPerpDexSubs = !subscribedClearinghouseDexes_.empty();
+    LeaveCriticalSection(&accountSubCs_);
+
+    if (!hasPerpDexSubs) {
+        hl::ws::parseClearinghouseState(cache_, json, diagLevel_, logCallback_);
+        return;
+    }
+
+    std::string dex = inferDexFromPositions(json);
+    hl::ws::parseClearinghouseState(cache_, json, diagLevel_, logCallback_, dex.c_str());
+}
+
+std::string WebSocketManager::inferDexFromPositions(const char* json) {
+    // Extract first coin from assetPositions, look up in g_assets to find its dex.
+    // Returns "" for main-dex, or perpDex name if coin belongs to a perpDex.
+    yyjson_doc* doc = yyjson_read(json, strlen(json), 0);
+    if (!doc) return "";
+    yyjson_val* root = yyjson_doc_get_root(doc);
+
+    yyjson_val* state = json::getObject(json::getObject(root, "data"), "clearinghouseState");
+    if (!state) state = root;
+
+    yyjson_val* positions = json::getArray(state, "assetPositions");
+    if (!positions || yyjson_arr_size(positions) == 0) {
+        yyjson_doc_free(doc);
+        // Empty snapshot — can't determine dex. Return "" (main-dex).
+        // Safe: if a perpDex has no positions, clearing main-dex is a no-op
+        // because the main-dex WS subscription will immediately repopulate.
+        return "";
+    }
+
+    yyjson_val* first = yyjson_arr_get_first(positions);
+    yyjson_val* posObj = json::getObject(first, "position");
+    char coinBuf[64] = {0};
+    if (posObj) json::getString(posObj, "coin", coinBuf, sizeof(coinBuf));
+    yyjson_doc_free(doc);
+
+    if (coinBuf[0] == 0) return "";
+
+    // Look up coin in asset registry
+    for (int i = 0; i < hl::g_assets.count; ++i) {
+        const hl::AssetInfo* a = hl::g_assets.getByIndex(i);
+        if (a && strcmp(a->coin, coinBuf) == 0 && a->isPerpDex && a->perpDex[0])
+            return a->perpDex;
+    }
+    return "";  // Main-dex or unknown coin
 }
 
 void WebSocketManager::parseOpenOrders(const char* json) {

@@ -29,8 +29,9 @@ struct RuntimeConfig {
     char baseUrl[256] = {0};        // REST API base URL
 
     // Credentials (do NOT log privateKey)
-    char walletAddress[96] = {0};   // 0x... address
+    char walletAddress[96] = {0};   // 0x... address (user or sub-account)
     char privateKey[96] = {0};      // Private key for signing
+    char vaultAddress[96] = {0};    // Sub-account/vault address for order routing [OPM-202]
 
     // Diagnostics
     int diagLevel = 0;              // 0=off, 1=errors, 2=info, 3=verbose

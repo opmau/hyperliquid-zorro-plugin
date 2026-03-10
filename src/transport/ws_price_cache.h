@@ -80,6 +80,7 @@ public:
 
     void setPosition(const PositionData& pos);
     void clearPositions();
+    void clearPositionsByDex(const std::string& dex);  // [OPM-212] Clear only positions from a specific dex
     PositionData getPosition(const std::string& coin) const;
     std::vector<PositionData> getAllPositions() const;
     DWORD getPositionAge(const std::string& coin) const;
