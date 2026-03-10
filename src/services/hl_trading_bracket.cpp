@@ -122,7 +122,7 @@ BracketResult placeBracketOrder(const BracketRequest& request) {
     // 1. Entry order (limit)
     {
         msgpack::BracketOrderWire w;
-        w.asset = assetIndex;
+        w.asset = meta::getApiAssetId(assetIndex);
         w.isBuy = isBuyEntry;
         w.price = fmtPrice(request.limitPrice);
         w.size = sizeStr;
@@ -145,7 +145,7 @@ BracketResult placeBracketOrder(const BracketRequest& request) {
             : request.tpTriggerPx * (1.0 - slippage);  // Sell: accept below trigger
 
         msgpack::BracketOrderWire w;
-        w.asset = assetIndex;
+        w.asset = meta::getApiAssetId(assetIndex);
         w.isBuy = tpIsBuy;
         w.price = fmtPrice(tpSlippagePrice);
         w.size = sizeStr;
@@ -167,7 +167,7 @@ BracketResult placeBracketOrder(const BracketRequest& request) {
             : request.slTriggerPx * (1.0 - slippage);
 
         msgpack::BracketOrderWire w;
-        w.asset = assetIndex;
+        w.asset = meta::getApiAssetId(assetIndex);
         w.isBuy = slIsBuy;
         w.price = fmtPrice(slSlippagePrice);
         w.size = sizeStr;
@@ -188,8 +188,9 @@ BracketResult placeBracketOrder(const BracketRequest& request) {
     // Reuse hashBatchModifyForSigning: generic packed-bytes → EIP-712 hash
     uint64_t nonce = generateNonce();
     bool isMainnet = !g_config.isTestnet;
+    std::string vault(g_config.vaultAddress);  // [OPM-202]
     eip712::ByteArray msgHash = eip712::hashBatchModifyForSigning(
-        packedAction, isMainnet, nonce, "");
+        packedAction, isMainnet, nonce, vault);
 
     if (msgHash.empty() || msgHash.size() != 32) {
         result.error = "Failed to generate EIP-712 message hash";
@@ -233,6 +234,14 @@ BracketResult placeBracketOrder(const BracketRequest& request) {
         ordersJson += orderBuf;
     }
 
+    // [OPM-202] Format vaultAddress for JSON payload
+    char vaultJson[128];
+    if (vault.empty()) {
+        strcpy_s(vaultJson, "null");
+    } else {
+        sprintf_s(vaultJson, "\"%s\"", vault.c_str());
+    }
+
     char json[4096];
     sprintf_s(json, sizeof(json),
         "{"
@@ -243,12 +252,13 @@ BracketResult placeBracketOrder(const BracketRequest& request) {
             "},"
             "\"nonce\":%llu,"
             "\"signature\":%s,"
-            "\"vaultAddress\":null,"
+            "\"vaultAddress\":%s,"
             "\"expiresAfter\":null"
         "}",
         ordersJson.c_str(),
         nonce,
-        sig.toJson().c_str()
+        sig.toJson().c_str(),
+        vaultJson
     );
 
     if (g_config.diagLevel >= 2) {

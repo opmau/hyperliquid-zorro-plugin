@@ -163,6 +163,19 @@ void PriceCache::clearPositions() {
     LeaveCriticalSection(&cs_);
 }
 
+void PriceCache::clearPositionsByDex(const std::string& dex) {
+    EnterCriticalSection(&cs_);
+    for (auto it = positions_.begin(); it != positions_.end(); ) {
+        if (it->second.dex == dex) {
+            it = positions_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    lastPositionsUpdate_ = GetTickCount();
+    LeaveCriticalSection(&cs_);
+}
+
 PositionData PriceCache::getPosition(const std::string& coin) const {
     EnterCriticalSection(&cs_);
     PositionData pos;

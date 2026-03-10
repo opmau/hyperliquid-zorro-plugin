@@ -15,9 +15,16 @@
 #include "../transport/json_helpers.h"
 #include <cstdio>
 #include <cstring>
+#include <set>
 
 namespace hl {
 namespace account {
+
+// =============================================================================
+// SESSION STATE
+// =============================================================================
+
+static AbstractionMode s_abstractionMode = AbstractionMode::Unknown;
 
 // =============================================================================
 // LOGGING HELPER
@@ -55,9 +62,14 @@ Balance getBalance(uint32_t maxAgeMs) {
         // age == MAXDWORD means WS never delivered clearinghouseState
         if (age < maxAgeMs) {
             result.dataReceived = true;
-            // [OPM-19] Perps equity + spot USDC = total balance visible in HL UI.
-            // clearinghouseState only returns perps data; spot USDC is separate.
-            result.accountValue = accData.accountValue + accData.spotUSDC;
+            // [OPM-200] Only add spot USDC for standard accounts.
+            // Unified/PortfolioMargin: crossMarginSummary.accountValue already includes spot.
+            // Unknown (query failure): assume unified (the default) to avoid inflation.
+            if (s_abstractionMode == AbstractionMode::Standard) {
+                result.accountValue = accData.accountValue + accData.spotUSDC;
+            } else {
+                result.accountValue = accData.accountValue;
+            }
             result.withdrawable = accData.withdrawable;
             result.marginUsed = accData.totalMarginUsed;
             result.totalNotional = accData.totalNtlPos;
@@ -208,6 +220,81 @@ double refreshSpotBalance() {
 }
 
 // =============================================================================
+// PERPDEX POSITION QUERIES [OPM-212]
+// =============================================================================
+
+// Collect unique perpDex names from the asset registry.
+// Avoids Transport→Service dependency by reading Foundation-layer g_assets directly.
+static std::set<std::string> getActivePerpDexNames() {
+    std::set<std::string> dexes;
+    for (int i = 0; i < g_assets.count; ++i) {
+        const AssetInfo* a = g_assets.getByIndex(i);
+        if (a && a->isPerpDex && a->perpDex[0]) {
+            dexes.insert(a->perpDex);
+        }
+    }
+    return dexes;
+}
+
+// [OPM-218] Subscribe to WS clearinghouseState for each known perpDex.
+// Called when perpDex assets are discovered (after asset loading).
+static bool s_perpDexWsSubscribed = false;
+
+static void subscribePerpDexChannels() {
+    if (s_perpDexWsSubscribed) return;
+    if (!g_config.enableWebSocket || !g_wsManager) return;
+
+    auto dexes = getActivePerpDexNames();
+    if (dexes.empty()) return;
+
+    auto* mgr = reinterpret_cast<hl::ws::WebSocketManager*>(g_wsManager);
+    for (const auto& dex : dexes)
+        mgr->subscribeClearinghouseStateDex(dex);
+
+    s_perpDexWsSubscribed = true;
+    if (g_config.diagLevel >= 1)
+        g_logger.logf(1, "subscribePerpDexChannels: subscribed %d perpDex(es)", (int)dexes.size());
+}
+
+// Fetch clearinghouseState for each known perpDex via HTTP.
+// Each perpDex has its own position set (not returned by the default query).
+static bool s_perpDexPositionsFetched = false;
+
+static void refreshPerpDexPositions() {
+    auto dexes = getActivePerpDexNames();
+    if (dexes.empty()) return;
+
+    for (const auto& dex : dexes) {
+        char body[256];
+        sprintf_s(body, "{\"type\":\"clearinghouseState\",\"user\":\"%s\",\"dex\":\"%s\"}",
+                  g_config.walletAddress, dex.c_str());
+
+        if (g_config.diagLevel >= 1) {
+            g_logger.logf(1, "refreshPerpDexPositions: querying dex=%s", dex.c_str());
+        }
+
+        http::Response resp = http::infoPost(body, false);
+        if (!resp.success() || resp.body.empty()) {
+            g_logger.logf(1, "refreshPerpDexPositions: dex=%s HTTP failed", dex.c_str());
+            continue;
+        }
+
+        if (g_priceCache) {
+            auto* cache = reinterpret_cast<hl::ws::PriceCache*>(g_priceCache);
+            hl::ws::parseClearinghouseState(*cache, resp.body.c_str(),
+                                            g_config.diagLevel, g_logger.callback,
+                                            dex.c_str());
+        }
+
+        if (g_config.diagLevel >= 1) {
+            g_logger.logf(1, "refreshPerpDexPositions: dex=%s response (%zu bytes)",
+                         dex.c_str(), resp.body.length());
+        }
+    }
+    s_perpDexPositionsFetched = true;
+}
+
+// =============================================================================
 // POSITION IMPLEMENTATION
 // =============================================================================
 
@@ -219,21 +306,32 @@ static bool ensurePositionData() {
 
     auto* cache = reinterpret_cast<hl::ws::PriceCache*>(g_priceCache);
     DWORD posAge = cache->getPositionsAge();
+    bool hasMainDexData = (posAge != MAXDWORD);
 
-    // If we have a position snapshot (even if empty), no fallback needed
-    if (posAge != MAXDWORD) return true;
+    // [OPM-219] PerpDex position fetching is decoupled from main-dex gate.
+    // Subaccounts that only trade on perpDex may have empty main-dex data,
+    // so perpDex positions must be fetched independently.
+    subscribePerpDexChannels();
+    if (!s_perpDexPositionsFetched) {
+        refreshPerpDexPositions();
+    }
 
-    // No position snapshot received — rate-limited HTTP fallback
+    if (hasMainDexData) {
+        return true;
+    }
+
+    // No main-dex position snapshot — rate-limited HTTP fallback
     static DWORD lastAttempt = 0;
     DWORD now = GetTickCount();
     DWORD elapsed = (now >= lastAttempt) ? (now - lastAttempt) : MAXDWORD;
     if (elapsed < config::POSITION_CACHE_MS) {
-        return false;  // Too soon since last HTTP attempt
+        return s_perpDexPositionsFetched;  // Have perpDex data at least
     }
 
     logMsg(1, "ensurePositionData", "No WS position data, HTTP fallback");
     lastAttempt = GetTickCount();
-    return refreshBalance();
+    bool ok = refreshBalance();
+    return ok || s_perpDexPositionsFetched;
 }
 
 PositionInfo getPosition(const char* coin) {
@@ -247,6 +345,25 @@ PositionInfo getPosition(const char* coin) {
     if (g_priceCache) {
         auto* cache = reinterpret_cast<hl::ws::PriceCache*>(g_priceCache);
         ws::PositionData wsPos = cache->getPosition(std::string(coin));
+
+        // [OPM-219] Fallback: "dex:COIN" didn't match, try bare coin
+        if (wsPos.size == 0 && strchr(coin, ':')) {
+            std::string bareCoin(strchr(coin, ':') + 1);
+            wsPos = cache->getPosition(bareCoin);
+        }
+
+        // [OPM-219] Fallback: bare "COIN" didn't match, try "dex:COIN"
+        if (wsPos.size == 0 && !strchr(coin, ':')) {
+            for (int i = 0; i < g_assets.count; ++i) {
+                const AssetInfo* a = g_assets.getByIndex(i);
+                if (a && a->isPerpDex && a->perpDex[0]
+                    && _stricmp(a->coin, coin) == 0) {
+                    std::string prefixed = std::string(a->perpDex) + ":" + coin;
+                    wsPos = cache->getPosition(prefixed);
+                    break;
+                }
+            }
+        }
 
         if (wsPos.size != 0) {
             result.coin = wsPos.coin;
@@ -410,8 +527,9 @@ PositionInfo convertWsPosition(const std::string& coin, double size, double entr
 // =============================================================================
 
 void clearCache() {
-    // No local cache to clear - data is in ws_price_cache
-    // This would clear cached HTTP responses if we had them
+    // Reset perpDex flags so positions are re-fetched/re-subscribed [OPM-212, OPM-218]
+    s_perpDexPositionsFetched = false;
+    s_perpDexWsSubscribed = false;
 }
 
 uint32_t getAccountDataAge() {
@@ -444,6 +562,55 @@ void subscribeAccountData() {
 }
 
 // =============================================================================
+// ACCOUNT ABSTRACTION MODE [OPM-200]
+// =============================================================================
+
+AbstractionMode queryAbstractionMode() {
+    if (!g_config.walletAddress[0]) {
+        s_abstractionMode = AbstractionMode::Unknown;
+        return s_abstractionMode;
+    }
+
+    char body[256];
+    sprintf_s(body, "{\"type\":\"userAbstraction\",\"user\":\"%s\"}", g_config.walletAddress);
+
+    http::Response resp = http::infoPost(body, false);
+    if (!resp.success() || resp.body.empty()) {
+        logMsg(1, "queryAbstractionMode", "HTTP request failed, assuming Unified (default)");
+        s_abstractionMode = AbstractionMode::Unknown;
+        return s_abstractionMode;
+    }
+
+    if (g_config.diagLevel >= 1) {
+        g_logger.logf(1, "queryAbstractionMode: response=%s", resp.body.c_str());
+    }
+
+    // Response is a JSON string value: "disabled", "unifiedAccount", "portfolioMargin"
+    if (resp.body.find("disabled") != std::string::npos) {
+        s_abstractionMode = AbstractionMode::Standard;
+    } else if (resp.body.find("portfolioMargin") != std::string::npos) {
+        s_abstractionMode = AbstractionMode::PortfolioMargin;
+    } else if (resp.body.find("unifiedAccount") != std::string::npos) {
+        s_abstractionMode = AbstractionMode::Unified;
+    } else {
+        logMsg(1, "queryAbstractionMode", "Unrecognized response, assuming Unified");
+        s_abstractionMode = AbstractionMode::Unknown;
+    }
+
+    const char* modeStr =
+        (s_abstractionMode == AbstractionMode::Standard) ? "Standard" :
+        (s_abstractionMode == AbstractionMode::Unified) ? "Unified" :
+        (s_abstractionMode == AbstractionMode::PortfolioMargin) ? "PortfolioMargin" : "Unknown";
+    g_logger.logf(1, "Account abstraction mode: %s", modeStr);
+
+    return s_abstractionMode;
+}
+
+AbstractionMode getAbstractionMode() {
+    return s_abstractionMode;
+}
+
+// =============================================================================
 // ADDRESS VALIDATION
 // =============================================================================
 
@@ -463,12 +630,13 @@ UserRole checkUserRole() {
         g_logger.logf(2, "checkUserRole: response=%s", resp.body.c_str());
     }
 
-    // Response is a JSON string like "User", "Agent", "Vault", "Subaccount", "Missing"
-    if (resp.body.find("Agent") != std::string::npos) return UserRole::Agent;
-    if (resp.body.find("Subaccount") != std::string::npos) return UserRole::Subaccount;
-    if (resp.body.find("Vault") != std::string::npos) return UserRole::Vault;
-    if (resp.body.find("Missing") != std::string::npos) return UserRole::Missing;
-    if (resp.body.find("User") != std::string::npos) return UserRole::User;
+    // API returns {"role":"<value>"} with lowercase/camelCase values [OPM-202]
+    // Order matters: "agent" response contains "user" in data field, so check "agent" first
+    if (resp.body.find("agent") != std::string::npos) return UserRole::Agent;
+    if (resp.body.find("subAccount") != std::string::npos) return UserRole::Subaccount;
+    if (resp.body.find("vault") != std::string::npos) return UserRole::Vault;
+    if (resp.body.find("missing") != std::string::npos) return UserRole::Missing;
+    if (resp.body.find("user") != std::string::npos) return UserRole::User;
 
     return UserRole::Unknown;
 }

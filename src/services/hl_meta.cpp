@@ -350,7 +350,7 @@ int fetchPerpDexMeta(const char* perpDex) {
         strncpy_s(info.name, displayName.c_str(), _TRUNCATE);
         strncpy_s(info.coin, coinName, _TRUNCATE);
         strncpy_s(info.collateral, collateralName, _TRUNCATE);
-        info.index = startCount + added;
+        info.index = perpDexOffset + localIdx;  // API asset ID [OPM-191]
         info.szDecimals = szDecimals;
         info.pxDecimals = pxDecimals;
         info.minSize = pow(10.0, -szDecimals);
@@ -433,6 +433,26 @@ int findAssetIndex(const char* coin) {
     // Try API coin name lookup (handles "BTC", "GOLD", "@107")
     idx = g_assets.findByCoin(coin);
     if (idx >= 0) return idx;
+
+    // Handle "dex:coin" API format (e.g., "xyz:XYZ100") [OPM-191]
+    const char* colon = strchr(coin, ':');
+    if (colon && colon > coin) {
+        char dexPart[32] = {0};
+        char bareCoin[64] = {0};
+        size_t dexLen = colon - coin;
+        if (dexLen < sizeof(dexPart)) {
+            strncpy_s(dexPart, sizeof(dexPart), coin, dexLen);
+            strncpy_s(bareCoin, sizeof(bareCoin), colon + 1, _TRUNCATE);
+            for (int i = 0; i < g_assets.count; ++i) {
+                const AssetInfo* asset = g_assets.getByIndex(i);
+                if (asset && asset->isPerpDex &&
+                    _stricmp(asset->coin, bareCoin) == 0 &&
+                    _stricmp(asset->perpDex, dexPart) == 0) {
+                    return i;
+                }
+            }
+        }
+    }
 
     // For perpDex assets, bare coin name fallback (e.g., "TSLA" -> first matching)
     auto it = s_perpDexMap.find(std::string(coin));
@@ -559,6 +579,11 @@ int getTotalAssetCount() {
 
 bool isMetaLoaded() {
     return s_metaLoaded;
+}
+
+int getApiAssetId(int registryIndex) {
+    const AssetInfo* info = g_assets.getByIndex(registryIndex);
+    return (info && info->index >= 0) ? info->index : registryIndex;
 }
 
 } // namespace meta

@@ -80,6 +80,7 @@ public:
     bool hasL2BookData(const std::string& coin);
     void subscribeUserFills();
     void subscribeClearinghouseState();
+    void subscribeClearinghouseStateDex(const std::string& dex);  // [OPM-218]
     void subscribeOpenOrders();
     void subscribeAllAccountData();
 
@@ -147,6 +148,10 @@ private:
     bool pendingOpenOrdersSub_;
     std::atomic<bool> initialSubsQueued_;
 
+    // PerpDex clearinghouseState subscriptions [OPM-218]
+    std::set<std::string> subscribedClearinghouseDexes_;
+    std::vector<std::string> pendingClearinghouseDexSubs_;
+
     // Order post queue
     CRITICAL_SECTION postCs_;
     struct PendingPost { int id; std::string json; };
@@ -179,6 +184,7 @@ private:
     void handleMessage(const char* data, size_t len);
     void parseL2Book(const char* json);
     void parseClearinghouseState(const char* json);
+    std::string inferDexFromPositions(const char* json);  // [OPM-218]
     void parseOpenOrders(const char* json);
     void parseUserFills(const char* json);
     void parseOrderUpdates(const char* json);

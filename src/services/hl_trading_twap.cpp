@@ -95,7 +95,7 @@ TwapResult placeTwapOrder(const TwapRequest& request) {
 
     // Build EIP-712 TWAP order action
     eip712::TwapOrderAction twapAction;
-    twapAction.asset = assetIndex;
+    twapAction.asset = meta::getApiAssetId(assetIndex);
     twapAction.isBuy = isBuy;
     twapAction.size = sizeStr;
     twapAction.reduceOnly = request.reduceOnly;
@@ -105,8 +105,9 @@ TwapResult placeTwapOrder(const TwapRequest& request) {
     // Hash with EIP-712 for signing
     uint64_t nonce = generateNonce();
     bool isMainnet = !g_config.isTestnet;
+    std::string vault(g_config.vaultAddress);  // [OPM-202]
     eip712::ByteArray msgHash = eip712::hashTwapOrderForSigning(
-        twapAction, isMainnet, nonce, "");
+        twapAction, isMainnet, nonce, vault);
 
     if (msgHash.empty() || msgHash.size() != 32) {
         result.error = "Failed to generate EIP-712 message hash";
@@ -120,6 +121,14 @@ TwapResult placeTwapOrder(const TwapRequest& request) {
         result.error = "Failed to sign TWAP order";
         logTwap(1, "place", "Signing failed");
         return result;
+    }
+
+    // [OPM-202] Format vaultAddress for JSON payload
+    char vaultJson[128];
+    if (vault.empty()) {
+        strcpy_s(vaultJson, "null");
+    } else {
+        sprintf_s(vaultJson, "\"%s\"", vault.c_str());
     }
 
     // Build signed TWAP order JSON
@@ -139,17 +148,18 @@ TwapResult placeTwapOrder(const TwapRequest& request) {
             "},"
             "\"nonce\":%llu,"
             "\"signature\":%s,"
-            "\"vaultAddress\":null,"
+            "\"vaultAddress\":%s,"
             "\"expiresAfter\":null"
         "}",
-        assetIndex,
+        twapAction.asset,  // API asset ID, not registry index [OPM-191]
         isBuy ? "true" : "false",
         sizeStr.c_str(),
         request.reduceOnly ? "true" : "false",
         request.durationMinutes,
         request.randomize ? "true" : "false",
         nonce,
-        sig.toJson().c_str()
+        sig.toJson().c_str(),
+        vaultJson
     );
 
     if (g_config.diagLevel >= 2) {
@@ -242,13 +252,14 @@ bool cancelTwapOrder(const char* coin, uint64_t twapId) {
 
     // Build EIP-712 TWAP cancel action
     eip712::TwapCancelAction cancelAction;
-    cancelAction.asset = assetIndex;
+    cancelAction.asset = meta::getApiAssetId(assetIndex);
     cancelAction.twapId = twapId;
 
     uint64_t nonce = generateNonce();
     bool isMainnet = !g_config.isTestnet;
+    std::string vault(g_config.vaultAddress);  // [OPM-202]
     eip712::ByteArray msgHash = eip712::hashTwapCancelForSigning(
-        cancelAction, isMainnet, nonce, "");
+        cancelAction, isMainnet, nonce, vault);
 
     if (msgHash.empty() || msgHash.size() != 32) {
         logTwap(1, "cancel", "EIP-712 hash failed");
@@ -259,6 +270,14 @@ bool cancelTwapOrder(const char* coin, uint64_t twapId) {
     if (!crypto::signHash(msgHash.data(), g_config.privateKey, sig)) {
         logTwap(1, "cancel", "Signing failed");
         return false;
+    }
+
+    // [OPM-202] Format vaultAddress for JSON payload
+    char vaultJson[128];
+    if (vault.empty()) {
+        strcpy_s(vaultJson, "null");
+    } else {
+        sprintf_s(vaultJson, "\"%s\"", vault.c_str());
     }
 
     // Build signed cancel JSON
@@ -272,13 +291,14 @@ bool cancelTwapOrder(const char* coin, uint64_t twapId) {
             "},"
             "\"nonce\":%llu,"
             "\"signature\":%s,"
-            "\"vaultAddress\":null,"
+            "\"vaultAddress\":%s,"
             "\"expiresAfter\":null"
         "}",
-        assetIndex,
+        cancelAction.asset,  // API asset ID, not registry index [OPM-191]
         twapId,
         nonce,
-        sig.toJson().c_str()
+        sig.toJson().c_str(),
+        vaultJson
     );
 
     http::Response resp = http::exchangePost(json);

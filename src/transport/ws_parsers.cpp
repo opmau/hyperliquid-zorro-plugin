@@ -150,7 +150,8 @@ OrderResponse parsePostResponse(const char* jsonStr, int diagLevel, LogCallback 
 //=============================================================================
 
 void parseClearinghouseState(PriceCache& cache, const char* jsonStr,
-                             int diagLevel, LogCallback logCb) {
+                             int diagLevel, LogCallback logCb,
+                             const char* dex) {
     yyjson_doc* doc = yyjson_read(jsonStr, strlen(jsonStr), 0);
     if (!doc) {
         logMsg(diagLevel, logCb, 1, "WS clearinghouseState: JSON parse error");
@@ -165,7 +166,10 @@ void parseClearinghouseState(PriceCache& cache, const char* jsonStr,
     if (!state) state = root;
 
     // --- Parse asset positions ---
-    cache.clearPositions();
+    // [OPM-212] Clear only positions from THIS dex, not all dexes.
+    // Each clearinghouseState response contains positions for one dex only.
+    std::string dexStr = dex ? dex : "";
+    cache.clearPositionsByDex(dexStr);
 
     yyjson_val* positions = json::getArray(state, "assetPositions");
     size_t idx, max;
@@ -179,6 +183,15 @@ void parseClearinghouseState(PriceCache& cache, const char* jsonStr,
 
         if (json::getString(posObj, "coin", buf, sizeof(buf)))
             pos.coin = buf;
+
+        // [OPM-219] Normalize perpDex coin names for cache key consistency.
+        // API returns bare coin names ("XYZ100") for perpDex queries, but
+        // lookup uses "dex:COIN" format ("xyz:XYZ100"). Prefix at storage.
+        if (!dexStr.empty() && !pos.coin.empty()
+            && pos.coin[0] != '@'
+            && pos.coin.find(':') == std::string::npos) {
+            pos.coin = dexStr + ":" + pos.coin;
+        }
 
         pos.size          = json::getDouble(posObj, "szi");
         pos.entryPx       = json::getDouble(posObj, "entryPx");
@@ -204,10 +217,12 @@ void parseClearinghouseState(PriceCache& cache, const char* jsonStr,
         }
 
         if (!pos.coin.empty()) {
+            pos.dex = dexStr;  // [OPM-212] Tag position with its dex
             cache.setPosition(pos);
             logMsg(diagLevel, logCb, 2,
-                   "WS clearinghouseState: %s size=%.6f entry=%.2f pnl=%.2f",
-                   pos.coin.c_str(), pos.size, pos.entryPx, pos.unrealizedPnl);
+                   "WS clearinghouseState: %s size=%.6f entry=%.2f pnl=%.2f dex=%s",
+                   pos.coin.c_str(), pos.size, pos.entryPx, pos.unrealizedPnl,
+                   dexStr.empty() ? "main" : dexStr.c_str());
         }
     }
 
