@@ -154,8 +154,10 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         // BrokerAsset subscription loops overwrite currentSymbol for every asset,
         // so currentSymbol is NOT safe for GET_PRICE. [OPM-6]
         if (!hl::g_trading.priceSymbol[0]) {
-            if (hl::g_config.diagLevel >= 1)
-                hl::g_logger.log(1, "GET_PRICE: No SET_SYMBOL received, returning 0");
+            // Always log — this is a data loss event the strategy needs to see
+            hl::g_logger.logf(1, "GET_PRICE(%d): priceSymbol empty (no SET_SYMBOL), "
+                "currentSymbol='%s' — returning 0",
+                priceType, hl::g_trading.currentSymbol);
             return 0.0;
         }
         const char* lookupCoin = hl::g_trading.priceSymbol;
@@ -179,7 +181,14 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
                 lookupCoin, fromCache ? "cache" : "HTTP", bid, ask);
         }
 
-        if (bid <= 0 || ask <= 0) return 0.0;
+        if (bid <= 0 || ask <= 0) {
+            // Always log — returning 0 means the strategy loses bid/ask data
+            hl::g_logger.logf(1, "GET_PRICE(%s): returning 0 — bid=%.4f ask=%.4f "
+                "(cache=%s, currentSymbol='%s')",
+                lookupCoin, bid, ask, fromCache ? "hit" : "miss",
+                hl::g_trading.currentSymbol);
+            return 0.0;
+        }
         if (priceType == 6) return bid;
         if (priceType == 5) return ask;
         return (bid + ask) / 2.0;  // Default: mid price
