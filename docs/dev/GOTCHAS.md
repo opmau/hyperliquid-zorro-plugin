@@ -40,16 +40,9 @@ The `g_config.stopOrderPending` flag bridges these two calls. It is set by `SET_
 
 `BrokerAsset` with `pPrice != NULL` is called for **every** subscribed asset during each bar update, not just the strategy's current asset. This means writing to `g_trading.currentSymbol` inside `BrokerAsset` would corrupt the `GET_PRICE` context. The fix: a separate `priceSymbol` field set only by `SET_SYMBOL`.
 
-### NFA Mode (Hedge=0)
-
-Hyperliquid has one position per asset (no hedging). The plugin operates in NFA mode:
-- Closing is done by placing an opposite-side `reduceOnly` order
-- `GET_COMPLIANCE` returns `2 + 8` (NFA + no hedging)
-- `BrokerSell2` always sets `reduceOnly = true`
-
 ### UTC Everywhere
 
-Hyperliquid returns UTC timestamps. Zorro uses UTC internally. Do not modify timezone settings in `ZorroFix.ini`.
+Hyperliquid returns UTC timestamps. Zorro uses UTC internally.
 
 `BrokerTime` returns: `25569.0 + time(NULL) / 86400.0` (OLE DATE format, UTC).
 

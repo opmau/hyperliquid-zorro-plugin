@@ -11,7 +11,7 @@ cd tests
 run_unit_tests.bat
 ```
 
-This runs all 17 tests in under 10 seconds. Exit code 0 = all pass, 1 = failures.
+This runs all 21 tests in under 10 seconds. Exit code 0 = all pass, 1 = failures.
 
 Run specific tests by calling the individual script:
 
@@ -44,6 +44,10 @@ compile_eip712_source_test.bat      # Just EIP-712 signing
 | 15 | `compile_trading_service_test.bat` | CLOID roundtrip, nonce monotonicity, TradeMap CRUD, fill status | OPM-9 |
 | 16 | `compile_account_service_test.bat` | Balance parsing, position parsing, HTTP fallback | OPM-9 |
 | 17 | `compile_market_service_test.bat` | Candle interval mapping, asset metadata, funding rate | OPM-9 |
+| 18 | `compile_market_service_http_test.bat` | Market service HTTP response parsing | OPM-9 |
+| 19 | `compile_account_service_http_test.bat` | Account service HTTP response parsing | OPM-9 |
+| 20 | `compile_account_service_ws_test.bat` | Account service WS cache interactions | OPM-9 |
+| 21 | `compile_market_service_ws_test.bat` | Market service WS cache interactions | OPM-9 |
 
 ### Test-to-File Mapping
 
@@ -66,6 +70,10 @@ compile_eip712_source_test.bat      # Just EIP-712 signing
 | Trading service logic, CLOID, nonce | `compile_trading_service_test.bat` |
 | Account service, balance, positions | `compile_account_service_test.bat` |
 | Market service, candles, funding rate | `compile_market_service_test.bat` |
+| Market service HTTP parsing | `compile_market_service_http_test.bat` |
+| Account service HTTP parsing | `compile_account_service_http_test.bat` |
+| Account service WS cache | `compile_account_service_ws_test.bat` |
+| Market service WS cache | `compile_market_service_ws_test.bat` |
 | Any broker/trading code | `run_unit_tests.bat` (all tests) |
 
 ---
@@ -240,7 +248,7 @@ The `cl` flags:
 Edit `run_unit_tests.bat` to add your test as the next numbered entry:
 
 ```batch
-echo [10/10] Testing my feature...
+echo [22/22] Testing my feature...
 call compile_my_feature_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
