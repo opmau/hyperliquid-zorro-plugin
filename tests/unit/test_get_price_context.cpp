@@ -1,20 +1,16 @@
 //=============================================================================
-// test_get_price_context.cpp - GET_PRICE asset context isolation [OPM-6]
+// test_get_price_context.cpp - GET_PRICE asset context tests
 //=============================================================================
-// PREVENTS BUG:
-//   OPM-6: GET_PRICE returns wrong asset's price when BrokerAsset loop
-//          overwrites currentSymbol and SET_SYMBOL was not called.
+// VALIDATES:
+//   GET_PRICE returns the correct price per Zorro's documented contract:
+//   "Returns a particular price after a BrokerAsset call" (brokercommand.md)
 //
-// SCENARIO:
-//   1. Zorro calls BrokerAsset() for BTC, ETH, SOL, ADA... (bar update)
-//   2. Each BrokerAsset call sets currentSymbol to its coin
-//   3. Script calls brokerCommand(GET_PRICE, 0) expecting BTC
-//   4. BUG: GET_PRICE returns SOL's price (last BrokerAsset coin)
-//
-// FIX:
-//   GET_PRICE must ONLY use priceSymbol (set by SET_SYMBOL).
-//   Without SET_SYMBOL, GET_PRICE returns 0 (no context).
-//   currentSymbol must NOT be used as a fallback for GET_PRICE.
+// KEY CONTRACT:
+//   - BrokerAsset sets both currentSymbol AND priceSymbol
+//   - GET_PRICE reads from priceSymbol
+//   - SET_SYMBOL also sets priceSymbol (for GET_BOOK, GET_OPTIONS, etc.)
+//   - In multi-asset setups, the last BrokerAsset/SET_SYMBOL call wins
+//   - Strategy must call asset(Asset) in TMFs to ensure correct context
 //=============================================================================
 
 #include "../test_framework.h"
@@ -26,7 +22,6 @@ using namespace hl::test;
 
 //=============================================================================
 // GET_PRICE lookup logic (extracted from hl_broker_commands.cpp)
-// This replicates the CURRENT (buggy) GET_PRICE resolution logic.
 //=============================================================================
 
 struct GetPriceResult {
@@ -36,15 +31,13 @@ struct GetPriceResult {
     double mid;
 };
 
-// Replicates the FIXED GET_PRICE handler logic from hl_broker_commands.cpp
-// After OPM-6 fix: ONLY uses priceSymbol (SET_SYMBOL). No currentSymbol fallback.
+// Replicates the GET_PRICE handler logic from hl_broker_commands.cpp
+// Uses priceSymbol (set by both BrokerAsset and SET_SYMBOL)
 GetPriceResult simulateGetPrice(hl::ws::PriceCache& cache) {
     GetPriceResult result = { nullptr, 0, 0, 0 };
 
-    // Fixed logic: priceSymbol only (set by SET_SYMBOL)
-    // currentSymbol is NOT used — it gets corrupted by BrokerAsset loops [OPM-6]
     if (!hl::g_trading.priceSymbol[0]) {
-        return result;  // No SET_SYMBOL → return zeros
+        return result;  // No BrokerAsset or SET_SYMBOL → return zeros
     }
 
     const char* lookupCoin = hl::g_trading.priceSymbol;
@@ -61,55 +54,63 @@ GetPriceResult simulateGetPrice(hl::ws::PriceCache& cache) {
 // TEST CASES
 //=============================================================================
 
-void test_get_price_no_set_symbol_must_not_use_current_symbol() {
-    // Reproduce OPM-6: BrokerAsset loop sets currentSymbol to "SOL",
-    // then GET_PRICE is called without SET_SYMBOL.
-    // EXPECTED: GET_PRICE returns 0 (no context)
-    // BUG: GET_PRICE returns SOL's price
+void test_get_price_after_broker_asset_returns_correct_price() {
+    // BrokerAsset for BTC sets priceSymbol, GET_PRICE returns BTC's price
 
     hl::ws::PriceCache cache;
     cache.setBidAsk("BTC", 67000.0, 67300.0);
     cache.setBidAsk("SOL", 83.5, 83.6);
 
-    // Simulate BrokerAsset loop: last asset was SOL
-    strncpy_s(hl::g_trading.currentSymbol, "SOL", _TRUNCATE);
-    // No SET_SYMBOL was called
-    hl::g_trading.priceSymbol[0] = '\0';
-
-    GetPriceResult r = simulateGetPrice(cache);
-
-    // After fix: lookupCoin should be nullptr (no context without SET_SYMBOL)
-    ASSERT_MSG(r.lookupCoin == nullptr,
-        "GET_PRICE must not use currentSymbol as fallback — it returns the wrong asset's price");
-
-    // Price should be 0 (not SOL's 83.x)
-    ASSERT_FLOAT_EQ_TOL(r.mid, 0.0, 1e-9);
-}
-
-void test_get_price_with_set_symbol_returns_correct_asset() {
-    // SET_SYMBOL("BTC") was called, GET_PRICE should return BTC's price
-    // regardless of what currentSymbol says
-
-    hl::ws::PriceCache cache;
-    cache.setBidAsk("BTC", 67000.0, 67300.0);
-    cache.setBidAsk("SOL", 83.5, 83.6);
-
-    // currentSymbol corrupted by BrokerAsset loop
-    strncpy_s(hl::g_trading.currentSymbol, "SOL", _TRUNCATE);
-    // But SET_SYMBOL was called for BTC
+    // Simulate BrokerAsset("BTC") — sets both currentSymbol and priceSymbol
+    strncpy_s(hl::g_trading.currentSymbol, "BTC", _TRUNCATE);
     strncpy_s(hl::g_trading.priceSymbol, "BTC", _TRUNCATE);
 
     GetPriceResult r = simulateGetPrice(cache);
 
-    // Should use priceSymbol, not currentSymbol
     ASSERT_NOT_NULL(r.lookupCoin);
     ASSERT_STREQ(r.lookupCoin, "BTC");
     ASSERT_FLOAT_EQ_TOL(r.bid, 67000.0, 0.01);
     ASSERT_FLOAT_EQ_TOL(r.ask, 67300.0, 0.01);
 }
 
-void test_get_price_both_empty_returns_zero() {
-    // Neither SET_SYMBOL nor BrokerAsset was called
+void test_get_price_last_broker_asset_wins() {
+    // BrokerAsset subscription loop: BTC then SOL.
+    // GET_PRICE should return SOL (last BrokerAsset call).
+
+    hl::ws::PriceCache cache;
+    cache.setBidAsk("BTC", 67000.0, 67300.0);
+    cache.setBidAsk("SOL", 83.5, 83.6);
+
+    // Simulate subscription loop: BTC first, then SOL
+    strncpy_s(hl::g_trading.currentSymbol, "SOL", _TRUNCATE);
+    strncpy_s(hl::g_trading.priceSymbol, "SOL", _TRUNCATE);
+
+    GetPriceResult r = simulateGetPrice(cache);
+
+    // Per Zorro contract: returns price of last BrokerAsset'd asset
+    ASSERT_STREQ(r.lookupCoin, "SOL");
+    ASSERT_FLOAT_EQ_TOL(r.bid, 83.5, 0.01);
+}
+
+void test_get_price_set_symbol_also_works() {
+    // SET_SYMBOL sets priceSymbol, GET_PRICE returns that asset's price
+
+    hl::ws::PriceCache cache;
+    cache.setBidAsk("BTC", 67000.0, 67300.0);
+
+    // Simulate SET_SYMBOL("BTC")
+    strncpy_s(hl::g_trading.currentSymbol, "BTC", _TRUNCATE);
+    strncpy_s(hl::g_trading.priceSymbol, "BTC", _TRUNCATE);
+
+    GetPriceResult r = simulateGetPrice(cache);
+
+    ASSERT_NOT_NULL(r.lookupCoin);
+    ASSERT_STREQ(r.lookupCoin, "BTC");
+    ASSERT_FLOAT_EQ_TOL(r.bid, 67000.0, 0.01);
+}
+
+void test_get_price_no_context_returns_zero() {
+    // Neither BrokerAsset nor SET_SYMBOL was called
 
     hl::ws::PriceCache cache;
     cache.setBidAsk("BTC", 67000.0, 67300.0);
@@ -123,24 +124,25 @@ void test_get_price_both_empty_returns_zero() {
     ASSERT_FLOAT_EQ_TOL(r.mid, 0.0, 1e-9);
 }
 
-void test_broker_asset_must_not_set_current_symbol() {
-    // Key invariant: GET_PRICE only uses priceSymbol (set by SET_SYMBOL).
-    // Even though BrokerAsset now sets currentSymbol again [OPM-197],
-    // GET_PRICE must NOT fall back to currentSymbol — that was the OPM-6 bug.
-    //
-    // This test verifies: without SET_SYMBOL, GET_PRICE returns 0,
-    // regardless of what currentSymbol contains.
-
-    // Clear context
-    hl::g_trading.currentSymbol[0] = '\0';
-    hl::g_trading.priceSymbol[0] = '\0';
+void test_get_price_asset_call_overrides_loop() {
+    // Subscription loop set priceSymbol to SOL, then strategy calls
+    // asset("BTC") which triggers BrokerAsset("BTC") → overrides priceSymbol.
+    // GET_PRICE should return BTC.
 
     hl::ws::PriceCache cache;
+    cache.setBidAsk("BTC", 67000.0, 67300.0);
     cache.setBidAsk("SOL", 83.5, 83.6);
 
-    // Even if currentSymbol were set (e.g., by BrokerAsset), GET_PRICE ignores it
+    // After subscription loop: SOL
+    strncpy_s(hl::g_trading.priceSymbol, "SOL", _TRUNCATE);
+    // Strategy calls asset("BTC") → BrokerAsset overrides
+    strncpy_s(hl::g_trading.currentSymbol, "BTC", _TRUNCATE);
+    strncpy_s(hl::g_trading.priceSymbol, "BTC", _TRUNCATE);
+
     GetPriceResult r = simulateGetPrice(cache);
-    ASSERT_NULL(r.lookupCoin);
+
+    ASSERT_STREQ(r.lookupCoin, "BTC");
+    ASSERT_FLOAT_EQ_TOL(r.bid, 67000.0, 0.01);
 }
 
 //=============================================================================
@@ -148,19 +150,19 @@ void test_broker_asset_must_not_set_current_symbol() {
 //=============================================================================
 
 int main() {
-    // Initialize globals for test
     hl::initGlobals();
 
     printf("\n");
     printf("=================================================\n");
-    printf("  GET_PRICE Context Isolation Tests [OPM-6]\n");
-    printf("  Prevents: Wrong asset price from BrokerAsset\n");
+    printf("  GET_PRICE Context Tests\n");
+    printf("  Contract: works after BrokerAsset or SET_SYMBOL\n");
     printf("=================================================\n\n");
 
-    RUN_TEST(get_price_no_set_symbol_must_not_use_current_symbol);
-    RUN_TEST(get_price_with_set_symbol_returns_correct_asset);
-    RUN_TEST(get_price_both_empty_returns_zero);
-    RUN_TEST(broker_asset_must_not_set_current_symbol);
+    RUN_TEST(get_price_after_broker_asset_returns_correct_price);
+    RUN_TEST(get_price_last_broker_asset_wins);
+    RUN_TEST(get_price_set_symbol_also_works);
+    RUN_TEST(get_price_no_context_returns_zero);
+    RUN_TEST(get_price_asset_call_overrides_loop);
 
     hl::cleanupGlobals();
 
