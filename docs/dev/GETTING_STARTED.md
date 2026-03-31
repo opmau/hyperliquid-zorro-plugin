@@ -94,7 +94,7 @@ Output: `build_vcpkg/Release/Hyperliquid_Dev.dll` (~2.6 MB)
 
 ## Run Tests
 
-The test suite is 17 tests that run in under 10 seconds:
+The test suite is 21 tests that run in under 10 seconds:
 
 ```batch
 cd tests
@@ -108,15 +108,15 @@ Expected output when all pass:
   Running fast tests before commit...
 =====================================================
 
-[1/17] Testing PIP/PIPCost/LotAmount formulas...
+[1/21] Testing PIP/PIPCost/LotAmount formulas...
        PASSED
-[2/17] Testing multi-asset position parsing...
+[2/21] Testing multi-asset position parsing...
        PASSED
 ...
-[17/17] Testing market service logic...
+[21/21] Testing market service WS cache interactions...
         PASSED
 =====================================================
-  ALL TESTS PASSED (17 tests)
+  ALL TESTS PASSED (21 tests)
 =====================================================
 ```
 

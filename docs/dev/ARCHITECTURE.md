@@ -230,7 +230,7 @@ DLLFUNC double BrokerCommand(int Command, intptr_t Parameter);
 
 | Command | Code | Returns | Notes |
 |---------|------|---------|-------|
-| `GET_COMPLIANCE` | 19 | `10` (2+8) | NFA mode, no hedging |
+| `GET_COMPLIANCE` | 19 | `0` | Returns 0; NFA mode controlled by Accounts.csv [OPM-213] |
 | `GET_MAXREQUESTS` | 16 | `5` | Max concurrent HTTP requests |
 | `GET_MAXTICKS` | 108 | `5000` | Hyperliquid candleSnapshot limit |
 | `GET_BROKERZONE` | 700 | `0` | UTC (no timezone offset) |
