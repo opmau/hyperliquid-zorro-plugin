@@ -154,8 +154,10 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         // BrokerAsset subscription loops overwrite currentSymbol for every asset,
         // so currentSymbol is NOT safe for GET_PRICE. [OPM-6]
         if (!hl::g_trading.priceSymbol[0]) {
-            if (hl::g_config.diagLevel >= 1)
-                hl::g_logger.log(1, "GET_PRICE: No SET_SYMBOL received, returning 0");
+            // Always log — this is a data loss event the strategy needs to see
+            hl::g_logger.logf(1, "GET_PRICE(%d): priceSymbol empty (no SET_SYMBOL), "
+                "currentSymbol='%s' — returning 0",
+                priceType, hl::g_trading.currentSymbol);
             return 0.0;
         }
         const char* lookupCoin = hl::g_trading.priceSymbol;
@@ -179,7 +181,14 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
                 lookupCoin, fromCache ? "cache" : "HTTP", bid, ask);
         }
 
-        if (bid <= 0 || ask <= 0) return 0.0;
+        if (bid <= 0 || ask <= 0) {
+            // Always log — returning 0 means the strategy loses bid/ask data
+            hl::g_logger.logf(1, "GET_PRICE(%s): returning 0 — bid=%.4f ask=%.4f "
+                "(cache=%s, currentSymbol='%s')",
+                lookupCoin, bid, ask, fromCache ? "hit" : "miss",
+                hl::g_trading.currentSymbol);
+            return 0.0;
+        }
         if (priceType == 6) return bid;
         if (priceType == 5) return ask;
         return (bid + ask) / 2.0;  // Default: mid price
@@ -250,6 +259,21 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         // parsePerpDex + buildCoinForApi to match the cache key.
         char perpDex[32], coin[64];
         parsePerpDex(symbol, perpDex, sizeof(perpDex), coin, sizeof(coin));
+
+        // [OPM-226] If parsePerpDex didn't find a perpDex suffix (bare name like "XYZ100"),
+        // resolve it from g_assets. Strategies pass the Zorro Name column (e.g. "XYZ100"),
+        // not the full Symbol (e.g. "XYZ100-USDC_xyz"), so the dex suffix is missing.
+        if (!perpDex[0]) {
+            for (int i = 0; i < hl::g_assets.count; ++i) {
+                const hl::AssetInfo* a = hl::g_assets.getByIndex(i);
+                if (a && a->isPerpDex && a->perpDex[0]
+                    && _stricmp(a->coin, coin) == 0) {
+                    strncpy_s(perpDex, a->perpDex, _TRUNCATE);
+                    break;
+                }
+            }
+        }
+
         std::string coinForApi = buildCoinForApi(perpDex, coin);
 
         double posSize = hl::account::getPositionSize(coinForApi.c_str());
@@ -437,7 +461,21 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
 
     case HL_GET_OPEN_ORDERS: {
         const char* symbol = (parameter != 0) ? (const char*)parameter : nullptr;
-        return 0;
+        if (!hl::g_config.enableWebSocket || !hl::g_priceCache) {
+            if (hl::g_config.diagLevel >= 2)
+                hl::g_logger.log(2, "GET_OPEN_ORDERS: WS not available, returning 0");
+            return 0;
+        }
+        auto* cache = static_cast<hl::ws::PriceCache*>(hl::g_priceCache);
+        int count = 0;
+        if (symbol && symbol[0]) {
+            count = static_cast<int>(cache->getOpenOrdersForCoin(symbol).size());
+        } else {
+            count = static_cast<int>(cache->getAllOpenOrders().size());
+        }
+        if (hl::g_config.diagLevel >= 2)
+            hl::g_logger.logf(2, "GET_OPEN_ORDERS(%s): %d", symbol ? symbol : "ALL", count);
+        return count;
     }
 
     case HL_VALIDATE_PRICES: {
