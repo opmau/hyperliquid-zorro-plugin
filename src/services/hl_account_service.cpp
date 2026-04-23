@@ -266,7 +266,13 @@ static bool s_perpDexPositionsFetched = false;
 
 static void refreshPerpDexPositions() {
     auto dexes = getActivePerpDexNames();
-    if (dexes.empty()) return;
+    if (dexes.empty()) {
+        if (g_config.diagLevel >= 1) {
+            g_logger.logf(1, "refreshPerpDexPositions: no active perpDex names (g_assets has %d assets)",
+                         g_assets.count);
+        }
+        return;
+    }
 
     for (const auto& dex : dexes) {
         char body[256];
@@ -290,9 +296,13 @@ static void refreshPerpDexPositions() {
                                             dex.c_str());
         }
 
+        // [OPM-226] Log response snippet and resulting cache state
         if (g_config.diagLevel >= 1) {
-            g_logger.logf(1, "refreshPerpDexPositions: dex=%s response (%zu bytes)",
-                         dex.c_str(), resp.body.length());
+            char snippet[256];
+            strncpy_s(snippet, resp.body.c_str(), sizeof(snippet) - 1);
+            snippet[sizeof(snippet) - 1] = '\0';
+            g_logger.logf(1, "refreshPerpDexPositions: dex=%s response (%zu bytes): %.200s",
+                         dex.c_str(), resp.body.length(), snippet);
         }
     }
     s_perpDexPositionsFetched = true;
@@ -342,6 +352,11 @@ PositionInfo getPosition(const char* coin) {
     PositionInfo result;
     if (!coin) return result;
 
+    // [OPM-226] Log the lookup key so we can trace what getPosition receives
+    if (g_config.diagLevel >= 3) {
+        g_logger.logf(3, "getPosition: lookup coin='%s'", coin);
+    }
+
     // Ensure we have position data (WS or HTTP fallback) [OPM-134]
     ensurePositionData();
 
@@ -354,6 +369,10 @@ PositionInfo getPosition(const char* coin) {
         if (wsPos.size == 0 && strchr(coin, ':')) {
             std::string bareCoin(strchr(coin, ':') + 1);
             wsPos = cache->getPosition(bareCoin);
+            if (wsPos.size != 0 && g_config.diagLevel >= 1) {
+                g_logger.logf(1, "getPosition: '%s' not found, bare '%s' matched (size=%.6f)",
+                              coin, bareCoin.c_str(), wsPos.size);
+            }
         }
 
         // [OPM-219] Fallback: bare "COIN" didn't match, try "dex:COIN"
@@ -364,6 +383,10 @@ PositionInfo getPosition(const char* coin) {
                     && _stricmp(a->coin, coin) == 0) {
                     std::string prefixed = std::string(a->perpDex) + ":" + coin;
                     wsPos = cache->getPosition(prefixed);
+                    if (wsPos.size != 0 && g_config.diagLevel >= 1) {
+                        g_logger.logf(1, "getPosition: bare '%s' not found, prefixed '%s' matched (size=%.6f)",
+                                      coin, prefixed.c_str(), wsPos.size);
+                    }
                     break;
                 }
             }
@@ -379,6 +402,21 @@ PositionInfo getPosition(const char* coin) {
             result.marginUsed = wsPos.marginUsed;
             result.timestamp = wsPos.timestamp;
             return result;
+        }
+
+        // [OPM-226] Position not found — dump cache keys for diagnosis
+        if (g_config.diagLevel >= 1) {
+            auto allPos = cache->getAllPositions();
+            if (allPos.empty()) {
+                g_logger.logf(1, "getPosition: '%s' NOT FOUND — cache is EMPTY", coin);
+            } else {
+                g_logger.logf(1, "getPosition: '%s' NOT FOUND — cache has %d positions:",
+                              coin, (int)allPos.size());
+                for (const auto& p : allPos) {
+                    g_logger.logf(1, "  cache key='%s' size=%.6f dex='%s'",
+                                  p.coin.c_str(), p.size, p.dex.c_str());
+                }
+            }
         }
     }
 

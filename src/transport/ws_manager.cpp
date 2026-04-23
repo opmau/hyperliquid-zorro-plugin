@@ -650,7 +650,7 @@ void WebSocketManager::parseL2Book(const char* json) {
 }
 
 void WebSocketManager::parseClearinghouseState(const char* json) {
-    // [OPM-218] If perpDex subscriptions exist, infer dex from coin names
+    // [OPM-218] If perpDex subscriptions exist, determine dex for this message
     EnterCriticalSection(&accountSubCs_);
     bool hasPerpDexSubs = !subscribedClearinghouseDexes_.empty();
     LeaveCriticalSection(&accountSubCs_);
@@ -660,7 +660,40 @@ void WebSocketManager::parseClearinghouseState(const char* json) {
         return;
     }
 
-    std::string dex = inferDexFromPositions(json);
+    // [OPM-226] Try to extract "dex" field from WS data object first.
+    // The WS response for perpDex subscriptions may include:
+    //   {"channel":"clearinghouseState","data":{"dex":"xyz",...}}
+    std::string dex;
+    {
+        yyjson_doc* doc = yyjson_read(json, strlen(json), 0);
+        if (doc) {
+            yyjson_val* root = yyjson_doc_get_root(doc);
+            yyjson_val* data = json::getObject(root, "data");
+            if (data) {
+                char dexBuf[64] = {0};
+                json::getString(data, "dex", dexBuf, sizeof(dexBuf));
+                if (dexBuf[0] && dexBuf[0] != '\0') {
+                    // Verify this dex is one we subscribed to
+                    EnterCriticalSection(&accountSubCs_);
+                    if (subscribedClearinghouseDexes_.count(dexBuf)) {
+                        dex = dexBuf;
+                    }
+                    LeaveCriticalSection(&accountSubCs_);
+                }
+            }
+            yyjson_doc_free(doc);
+        }
+    }
+
+    // Fall back to heuristic inference if no "dex" field found
+    if (dex.empty()) {
+        dex = inferDexFromPositions(json);
+    }
+
+    if (diagLevel_ >= 3 && !dex.empty()) {
+        logf(3, "WS clearinghouseState: dex=%s", dex.c_str());
+    }
+
     hl::ws::parseClearinghouseState(cache_, json, diagLevel_, logCallback_, dex.c_str());
 }
 
@@ -677,9 +710,12 @@ std::string WebSocketManager::inferDexFromPositions(const char* json) {
     yyjson_val* positions = json::getArray(state, "assetPositions");
     if (!positions || yyjson_arr_size(positions) == 0) {
         yyjson_doc_free(doc);
-        // Empty snapshot — can't determine dex. Return "" (main-dex).
-        // Safe: if a perpDex has no positions, clearing main-dex is a no-op
-        // because the main-dex WS subscription will immediately repopulate.
+        // [OPM-226] Empty snapshot — can't determine dex. Return "" (main-dex).
+        // This is safe for main-dex but WRONG for perpDex with no positions —
+        // clearPositionsByDex("") would wipe main-dex data. Callers should
+        // prefer extracting "dex" from the WS data object first.
+        if (diagLevel_ >= 1)
+            logf(1, "WS inferDex: empty assetPositions, defaulting to main-dex");
         return "";
     }
 
@@ -691,12 +727,31 @@ std::string WebSocketManager::inferDexFromPositions(const char* json) {
 
     if (coinBuf[0] == 0) return "";
 
+    // [OPM-226] Handle @index format coins (e.g., "@110001") by resolving
+    // through the WS index mapping → then look up the resolved coin in g_assets
+    if (coinBuf[0] == '@') {
+        int idx = atoi(coinBuf + 1);
+        if (idx > 0) {
+            std::string resolved = getCoinByIndex(idx);
+            if (!resolved.empty()) {
+                if (diagLevel_ >= 1)
+                    logf(1, "WS inferDex: resolved %s → %s", coinBuf, resolved.c_str());
+                strncpy_s(coinBuf, resolved.c_str(), _TRUNCATE);
+            } else if (diagLevel_ >= 1) {
+                logf(1, "WS inferDex: no index mapping for %s", coinBuf);
+            }
+        }
+    }
+
     // Look up coin in asset registry
     for (int i = 0; i < hl::g_assets.count; ++i) {
         const hl::AssetInfo* a = hl::g_assets.getByIndex(i);
         if (a && strcmp(a->coin, coinBuf) == 0 && a->isPerpDex && a->perpDex[0])
             return a->perpDex;
     }
+
+    if (diagLevel_ >= 2)
+        logf(2, "WS inferDex: coin=%s not found in perpDex assets, treating as main-dex", coinBuf);
     return "";  // Main-dex or unknown coin
 }
 
