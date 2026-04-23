@@ -101,3 +101,25 @@ docs/LINEAR_SNAPSHOT.md
 
 # Environment variables (may contain API keys)
 .env
+
+# Scraped documentation (regenerated locally, not source of truth)
+docs/zorro_docs/
+docs/hyperliquid_docs/
+docs/hyperliquid-api/
+
+# Test triage artifacts (generated output)
+tests/TRIAGE_*
+tests/README_TRIAGE.md
+tests/triage_report.md
+tests/generate_triage_report.py
+
+# Stray redirection / accidental files
+/null
+/refs/
+/test_err.txt
+/test_out.txt
+/.tmp/
+
+# Claude Code build/test state markers (transient)
+.claude-build-ok
+.claude-test-ok
