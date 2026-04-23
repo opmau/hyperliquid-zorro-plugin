@@ -69,6 +69,11 @@ DLLFUNC int BrokerAsset(char* symbol, double* pPrice, double* pSpread,
                 auto* wsMgr = static_cast<hl::ws::WebSocketManager*>(hl::g_wsManager);
                 wsMgr->subscribeL2Book(coinForApi);
             }
+            // Flag the owning perpDex so its clearinghouseState sub and HTTP
+            // position fetches run on demand. Main-dex assets skip this. [OPM-439]
+            if (asset->isPerpDex && asset->perpDex[0]) {
+                hl::account::markPerpDexActive(asset->perpDex);
+            }
             // Set static parameters using pre-calculated values from metadata [OPM-198]
             if (pPip) *pPip = asset->tickSize;
             if (pPipCost) *pPipCost = asset->tickSize * asset->minSize;
