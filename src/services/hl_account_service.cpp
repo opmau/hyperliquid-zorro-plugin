@@ -223,17 +223,21 @@ double refreshSpotBalance() {
 // PERPDEX POSITION QUERIES [OPM-212]
 // =============================================================================
 
-// Collect unique perpDex names from the asset registry.
-// Avoids Transport→Service dependency by reading Foundation-layer g_assets directly.
+// PerpDex names the strategy has explicitly subscribed to via BrokerAsset. [OPM-439]
+// Main-thread-only (populated from BrokerAsset, read from ensurePositionData on the
+// same thread), so no synchronization is required.
+static std::set<std::string> s_activePerpDexes;
+
+void markPerpDexActive(const char* perpDex) {
+    if (!perpDex || !*perpDex) return;
+    s_activePerpDexes.insert(perpDex);
+}
+
+// Return perpDex names the strategy has asked to subscribe to. [OPM-439]
+// Previously scanned the whole asset registry, which caused 8 clearinghouseState
+// subs for single-account strategies that never touched a perpDex.
 static std::set<std::string> getActivePerpDexNames() {
-    std::set<std::string> dexes;
-    for (int i = 0; i < g_assets.count; ++i) {
-        const AssetInfo* a = g_assets.getByIndex(i);
-        if (a && a->isPerpDex && a->perpDex[0]) {
-            dexes.insert(a->perpDex);
-        }
-    }
-    return dexes;
+    return s_activePerpDexes;
 }
 
 // [OPM-218] Subscribe to WS clearinghouseState for each known perpDex.
@@ -530,6 +534,8 @@ void clearCache() {
     // Reset perpDex flags so positions are re-fetched/re-subscribed [OPM-212, OPM-218]
     s_perpDexPositionsFetched = false;
     s_perpDexWsSubscribed = false;
+    // Drop the strategy-activated perpDex set so a fresh session starts clean [OPM-439]
+    s_activePerpDexes.clear();
 }
 
 uint32_t getAccountDataAge() {
