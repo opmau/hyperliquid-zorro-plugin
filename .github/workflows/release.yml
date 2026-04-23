@@ -1,0 +1,115 @@
+name: Release
+
+# Builds Hyperliquid.dll (production, 32-bit) when a v* tag is pushed and
+# attaches the DLL to the corresponding GitHub Release. If a Release already
+# exists for the tag (e.g. created manually via `gh release create`), the DLL
+# is uploaded to that Release; otherwise a new Release is created from the
+# CHANGELOG.md section matching the tag.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify CMakeLists.txt version matches tag
+        shell: bash
+        run: |
+          EXPECTED="${{ steps.version.outputs.version }}"
+          ACTUAL=$(grep -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | head -1 | awk '{print $2}')
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::CMakeLists.txt version ($ACTUAL) does not match tag ($EXPECTED)"
+            exit 1
+          fi
+          echo "Version OK: $ACTUAL"
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Set up Developer Command Prompt (Win32)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x86
+
+      - name: Set up vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: '2024.11.16'
+          runVcpkgInstall: false
+
+      - name: Configure CMake (production, Win32, DEV_BUILD=OFF)
+        shell: cmd
+        run: |
+          mkdir build_prod
+          cd build_prod
+          cmake .. -G "Visual Studio 17 2022" -A Win32 -DDEV_BUILD=OFF ^
+            -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake ^
+            -DVCPKG_TARGET_TRIPLET=x86-windows-static
+
+      - name: Build Hyperliquid.dll
+        shell: cmd
+        run: cmake --build build_prod --config Release
+
+      - name: Verify DLL produced
+        shell: bash
+        run: |
+          if [ ! -f "build_prod/Release/Hyperliquid.dll" ]; then
+            echo "::error::Hyperliquid.dll not produced"
+            exit 1
+          fi
+          echo "DLL size: $(stat -c%s build_prod/Release/Hyperliquid.dll 2>/dev/null || wc -c < build_prod/Release/Hyperliquid.dll) bytes"
+
+      - name: Run unit tests (price cache)
+        shell: cmd
+        run: |
+          build_prod\Release\test_ws_price_cache.exe
+
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          NOTES=$(awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md)
+          if [ -z "$NOTES" ]; then
+            echo "::warning::No CHANGELOG entry found for version $VERSION"
+            NOTES="Release $VERSION — see CHANGELOG.md for details."
+          fi
+          {
+            echo 'notes<<EOF'
+            echo "$NOTES"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body: ${{ steps.notes.outputs.notes }}
+          files: build_prod/Release/Hyperliquid.dll
+          fail_on_unmatched_files: true
