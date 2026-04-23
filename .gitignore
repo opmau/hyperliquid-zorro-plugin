@@ -123,3 +123,7 @@ tests/generate_triage_report.py
 # Claude Code build/test state markers (transient)
 .claude-build-ok
 .claude-test-ok
+
+# Local working notes (not tracked)
+docs/REFACTOR_CHECKLIST_v2.md
+docs/archive/
