@@ -63,8 +63,25 @@ __pycache__/
 api.def
 
 # Build output (CMake/MSVC generated files)
-build/
+# build/ is used as both a scripts dir (.bat files) and a CMake output dir.
+# Ignore the CMake output files and subdirs but keep .bat scripts tracked.
+build/CMakeCache.txt
+build/CMakeFiles/
+build/cmake_install.cmake
+build/*.vcxproj
+build/*.vcxproj.filters
+build/*.sln
+build/*.dll
+build/*.exp
+build/*.lib
+build/*.txt
+build/Release/
+build/Debug/
+build/*.dir/
+build/.cmake/
+build/x64/
 build_vcpkg/
+build_prod/
 build32/
 
 # Other binary/compiled
