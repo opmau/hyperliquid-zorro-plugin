@@ -184,6 +184,21 @@ void parseClearinghouseState(PriceCache& cache, const char* jsonStr,
         if (json::getString(posObj, "coin", buf, sizeof(buf)))
             pos.coin = buf;
 
+        // [OPM-226] Handle @index format coins from WS perpDex data.
+        // WS may deliver positions with @index coins (e.g., "@110001").
+        // When dex is known, these are perpDex positions that need conversion
+        // to human-readable names before prefixing. Log unconverted @index
+        // coins as a warning since they can't be looked up by name.
+        if (!dexStr.empty() && !pos.coin.empty() && pos.coin[0] == '@') {
+            // @index coins: the caller should have resolved these already
+            // via index mappings. If we still have @index, log it and store
+            // with dex prefix anyway so clearPositionsByDex works correctly.
+            logMsg(diagLevel, logCb, 1,
+                   "WS clearinghouseState: @index coin %s on dex=%s (needs index mapping)",
+                   pos.coin.c_str(), dexStr.c_str());
+            pos.coin = dexStr + ":" + pos.coin;
+        }
+
         // [OPM-219] Normalize perpDex coin names for cache key consistency.
         // API returns bare coin names ("XYZ100") for perpDex queries, but
         // lookup uses "dex:COIN" format ("xyz:XYZ100"). Prefix at storage.
