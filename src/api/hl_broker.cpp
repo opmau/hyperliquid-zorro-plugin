@@ -440,8 +440,8 @@ DLLFUNC int BrokerTime(DATE *pTimeGMT) {
 
 DLLFUNC double BrokerCommand(int mode, intptr_t parameter) {
     double result = handleBrokerCommand(mode, parameter);
-    if (hl::g_config.diagLevel >= 1 && mode != GET_VOLUME) {
-        hl::g_logger.logf(1, "BrokerCommand: mode=%d param=%lld -> %.4f",
+    if (hl::g_config.diagLevel >= 3 && mode != GET_VOLUME) {
+        hl::g_logger.logf(3, "BrokerCommand: mode=%d param=%lld -> %.4f",
                           mode, (long long)parameter, result);
     }
     return result;

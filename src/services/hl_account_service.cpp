@@ -223,17 +223,21 @@ double refreshSpotBalance() {
 // PERPDEX POSITION QUERIES [OPM-212]
 // =============================================================================
 
-// Collect unique perpDex names from the asset registry.
-// Avoids Transport→Service dependency by reading Foundation-layer g_assets directly.
+// PerpDex names the strategy has explicitly subscribed to via BrokerAsset. [OPM-439]
+// Main-thread-only (populated from BrokerAsset, read from ensurePositionData on the
+// same thread), so no synchronization is required.
+static std::set<std::string> s_activePerpDexes;
+
+void markPerpDexActive(const char* perpDex) {
+    if (!perpDex || !*perpDex) return;
+    s_activePerpDexes.insert(perpDex);
+}
+
+// Return perpDex names the strategy has asked to subscribe to. [OPM-439]
+// Previously scanned the whole asset registry, which caused 8 clearinghouseState
+// subs for single-account strategies that never touched a perpDex.
 static std::set<std::string> getActivePerpDexNames() {
-    std::set<std::string> dexes;
-    for (int i = 0; i < g_assets.count; ++i) {
-        const AssetInfo* a = g_assets.getByIndex(i);
-        if (a && a->isPerpDex && a->perpDex[0]) {
-            dexes.insert(a->perpDex);
-        }
-    }
-    return dexes;
+    return s_activePerpDexes;
 }
 
 // [OPM-218] Subscribe to WS clearinghouseState for each known perpDex.
@@ -262,7 +266,13 @@ static bool s_perpDexPositionsFetched = false;
 
 static void refreshPerpDexPositions() {
     auto dexes = getActivePerpDexNames();
-    if (dexes.empty()) return;
+    if (dexes.empty()) {
+        if (g_config.diagLevel >= 1) {
+            g_logger.logf(1, "refreshPerpDexPositions: no active perpDex names (g_assets has %d assets)",
+                         g_assets.count);
+        }
+        return;
+    }
 
     for (const auto& dex : dexes) {
         char body[256];
@@ -286,9 +296,13 @@ static void refreshPerpDexPositions() {
                                             dex.c_str());
         }
 
+        // [OPM-226] Log response snippet and resulting cache state
         if (g_config.diagLevel >= 1) {
-            g_logger.logf(1, "refreshPerpDexPositions: dex=%s response (%zu bytes)",
-                         dex.c_str(), resp.body.length());
+            char snippet[256];
+            strncpy_s(snippet, resp.body.c_str(), sizeof(snippet) - 1);
+            snippet[sizeof(snippet) - 1] = '\0';
+            g_logger.logf(1, "refreshPerpDexPositions: dex=%s response (%zu bytes): %.200s",
+                         dex.c_str(), resp.body.length(), snippet);
         }
     }
     s_perpDexPositionsFetched = true;
@@ -338,6 +352,11 @@ PositionInfo getPosition(const char* coin) {
     PositionInfo result;
     if (!coin) return result;
 
+    // [OPM-226] Log the lookup key so we can trace what getPosition receives
+    if (g_config.diagLevel >= 3) {
+        g_logger.logf(3, "getPosition: lookup coin='%s'", coin);
+    }
+
     // Ensure we have position data (WS or HTTP fallback) [OPM-134]
     ensurePositionData();
 
@@ -350,6 +369,10 @@ PositionInfo getPosition(const char* coin) {
         if (wsPos.size == 0 && strchr(coin, ':')) {
             std::string bareCoin(strchr(coin, ':') + 1);
             wsPos = cache->getPosition(bareCoin);
+            if (wsPos.size != 0 && g_config.diagLevel >= 1) {
+                g_logger.logf(1, "getPosition: '%s' not found, bare '%s' matched (size=%.6f)",
+                              coin, bareCoin.c_str(), wsPos.size);
+            }
         }
 
         // [OPM-219] Fallback: bare "COIN" didn't match, try "dex:COIN"
@@ -360,6 +383,10 @@ PositionInfo getPosition(const char* coin) {
                     && _stricmp(a->coin, coin) == 0) {
                     std::string prefixed = std::string(a->perpDex) + ":" + coin;
                     wsPos = cache->getPosition(prefixed);
+                    if (wsPos.size != 0 && g_config.diagLevel >= 1) {
+                        g_logger.logf(1, "getPosition: bare '%s' not found, prefixed '%s' matched (size=%.6f)",
+                                      coin, prefixed.c_str(), wsPos.size);
+                    }
                     break;
                 }
             }
@@ -375,6 +402,21 @@ PositionInfo getPosition(const char* coin) {
             result.marginUsed = wsPos.marginUsed;
             result.timestamp = wsPos.timestamp;
             return result;
+        }
+
+        // [OPM-226] Position not found — dump cache keys for diagnosis
+        if (g_config.diagLevel >= 1) {
+            auto allPos = cache->getAllPositions();
+            if (allPos.empty()) {
+                g_logger.logf(1, "getPosition: '%s' NOT FOUND — cache is EMPTY", coin);
+            } else {
+                g_logger.logf(1, "getPosition: '%s' NOT FOUND — cache has %d positions:",
+                              coin, (int)allPos.size());
+                for (const auto& p : allPos) {
+                    g_logger.logf(1, "  cache key='%s' size=%.6f dex='%s'",
+                                  p.coin.c_str(), p.size, p.dex.c_str());
+                }
+            }
         }
     }
 
@@ -530,6 +572,8 @@ void clearCache() {
     // Reset perpDex flags so positions are re-fetched/re-subscribed [OPM-212, OPM-218]
     s_perpDexPositionsFetched = false;
     s_perpDexWsSubscribed = false;
+    // Drop the strategy-activated perpDex set so a fresh session starts clean [OPM-439]
+    s_activePerpDexes.clear();
 }
 
 uint32_t getAccountDataAge() {

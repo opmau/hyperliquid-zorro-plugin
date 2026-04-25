@@ -265,10 +265,10 @@ PriceData getPrice(const char* coin, uint32_t maxAgeMs) {
 
         recordSeed(coin);
 
-        if (g_config.diagLevel >= 1) {
+        if (g_config.diagLevel >= 2) {
             char msg[128];
             sprintf_s(msg, "HTTP fallback for %s: bid=%.4f ask=%.4f", coin, httpBid, httpAsk);
-            logMsg(1, "getPrice", msg);
+            logMsg(2, "getPrice", msg);
         }
     }
 

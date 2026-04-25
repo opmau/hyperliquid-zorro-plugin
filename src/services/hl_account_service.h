@@ -160,6 +160,19 @@ uint32_t getPositionsAge();
 /// Call after WebSocket is connected
 void subscribeAccountData();
 
+/// Mark a perpDex as actively used by the running strategy. [OPM-439]
+///
+/// Call this when Zorro subscribes a perpDex asset via BrokerAsset so the
+/// plugin only opens clearinghouseState WS subscriptions and HTTP position
+/// fetches for perpDexes the strategy actually trades. Main-dex-only
+/// strategies (the common case) will activate zero perpDexes and avoid
+/// ~54k unused WS messages per session plus 7 unnecessary HTTP calls at
+/// INITRUN.
+///
+/// Idempotent. Safe to call repeatedly for the same perpDex.
+/// @param perpDex PerpDex name (e.g., "xyz"). NULL or empty is a no-op.
+void markPerpDexActive(const char* perpDex);
+
 // =============================================================================
 // ACCOUNT ABSTRACTION MODE [OPM-200]
 // =============================================================================
