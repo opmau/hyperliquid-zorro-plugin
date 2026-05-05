@@ -11,6 +11,7 @@
 #include "hl_config.h"
 #include <windows.h>
 #include <string>
+#include <deque>
 #include <map>
 #include <set>
 #include <atomic>
@@ -114,21 +115,68 @@ struct TradingState {
 };
 
 // =============================================================================
-// LOGGER (decouples from Zorro's BrokerMessage)
-// Thread safety: Atomic level, callback assumed thread-safe
+// LOGGER (decouples from Zorro's BrokerMessage) [OPM-550]
+// =============================================================================
+// Threading model:
+//   - Producers (any thread, especially WS connection thread): call log/logf.
+//     These enqueue to a bounded internal queue; never block on Zorro.
+//   - Consumer (main/Zorro thread): calls drain() to flush queued messages
+//     through the user callback (= BrokerMessage). The main thread is the
+//     only safe place for SendMessage(GUI), which BrokerMessage uses.
+//
+// Why: previously logf() called BrokerMessage directly from the WS thread,
+// which is a synchronous SendMessage(GUI). When the GUI thread was busy, the
+// WS thread blocked for hundreds of ms, starving message dispatch and causing
+// price-cache staleness storms (OPM-550).
+//
+// Bounded queue: if producers outrun the consumer the oldest entries are
+// dropped and a "messages dropped" counter is incremented. This is reported
+// at flush time so the operator knows logging is being throttled.
 // =============================================================================
 
 using LogCallback = int(*)(const char*);
 
-struct Logger {
-    LogCallback callback = nullptr;
+class Logger {
+public:
+    LogCallback callback = nullptr;          // set once at plugin load
     std::atomic<int> level{0};
 
-    void log(int minLevel, const char* msg) const;
-    void logf(int minLevel, const char* fmt, ...) const;
-    void error(const char* msg) const { log(1, msg); }
-    void info(const char* msg) const { log(2, msg); }
-    void debug(const char* msg) const { log(3, msg); }
+    Logger();
+    ~Logger();
+
+    Logger(const Logger&) = delete;
+    Logger& operator=(const Logger&) = delete;
+
+    // Producer API — safe to call from any thread.
+    void log(int minLevel, const char* msg);
+    void logf(int minLevel, const char* fmt, ...);
+    void error(const char* msg) { log(1, msg); }
+    void info(const char* msg)  { log(2, msg); }
+    void debug(const char* msg) { log(3, msg); }
+
+    // Enqueue a pre-filtered message (bypasses the internal level check).
+    // Used as the logCallback target for ws_manager / ws_connection, which
+    // do their own level filtering before calling out.
+    void enqueue(const char* msg);
+
+    // Consumer API — call from MAIN THREAD ONLY (Zorro / BrokerCommand path).
+    // Drains up to maxMessages from the queue and forwards them to callback.
+    // Returns the number of messages drained.
+    size_t drain(size_t maxMessages = 256);
+
+    // Synchronous flush — drain everything that's queued. Use on shutdown.
+    void flush();
+
+    // Diagnostics
+    size_t queueDepth() const;
+    uint64_t messagesDropped() const;
+
+private:
+    mutable CRITICAL_SECTION cs_;
+    std::deque<std::string> queue_;
+    static const size_t MAX_QUEUE_DEPTH = 10000;  // ~10 min at 17 msg/s
+    std::atomic<uint64_t> dropped_{0};
+    uint64_t lastReportedDrops_ = 0;  // accessed from main thread only (drain)
 };
 
 // =============================================================================

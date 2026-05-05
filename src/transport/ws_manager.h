@@ -12,6 +12,7 @@
 
 #include "ws_connection.h"
 #include "ws_price_cache.h"
+#include <cstdint>
 #include <queue>
 #include <map>
 #include <set>
@@ -175,6 +176,20 @@ private:
     // Index-to-coin mapping (for allMids parsing: @142 -> "BTC")
     mutable CRITICAL_SECTION indexMapCs_;
     std::map<int, std::string> indexToCoin_;
+
+    // [OPM-550] Phase 1.6 — per-channel handler timing.
+    // handleMessage() runs only on the connection thread, so plain ints suffice.
+    enum ChannelKind {
+        CK_L2BOOK = 0, CK_CLEARING, CK_OPEN_ORDERS, CK_USER_FILLS,
+        CK_ORDER_UPDATES, CK_POST, CK_OTHER, CK_COUNT
+    };
+    struct ChannelStats {
+        uint64_t totalMs;
+        DWORD maxMs;
+        uint64_t count;
+    };
+    ChannelStats channelStats_[CK_COUNT];
+    static const char* channelKindName(int k);
 
     // Thread functions
     static DWORD WINAPI ConnectionThreadProc(LPVOID param);

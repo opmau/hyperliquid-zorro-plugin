@@ -234,9 +234,22 @@ static Response sendHttpInternal(const char* fullUrl, const char* body,
         g_logger.logf(2, "HTTP Send: %s", fullUrl);
     }
 
+    // [OPM-550] H4 instrumentation: time the call. The main thread spending
+    // 30+ seconds inside http_request would explain the BrokerTrade fallback
+    // gaps even if the WS thread were healthy.
+    DWORD startMs = GetTickCount();
+
     // Call the low-level function (which has SEH handling)
     size_t resultSize = 0;
     HttpResultCode result = sendHttpRaw(fullUrl, body, method, buffer, bufferSize, &resultSize);
+
+    DWORD durationMs = GetTickCount() - startMs;
+    if (durationMs >= 5000) {
+        // Always log slow requests, regardless of diag level
+        g_logger.logf(1, "HTTP SLOW: %lums %s", (unsigned long)durationMs, fullUrl);
+    } else if (g_config.diagLevel >= 2) {
+        g_logger.logf(2, "HTTP Done: %lums %s", (unsigned long)durationMs, fullUrl);
+    }
 
     // Handle result
     switch (result) {
