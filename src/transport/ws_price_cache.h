@@ -11,6 +11,8 @@
 #pragma once
 
 #include "ws_types.h"
+#include <atomic>
+#include <cstdint>
 #include <map>
 #include <vector>
 
@@ -113,6 +115,20 @@ public:
 
     void clear();
 
+    //=========================================================================
+    // [OPM-550] H3 instrumentation — WS hot-path lock contention
+    //=========================================================================
+    // setBidAsk() is the WS thread's hot path; if some other code path holds
+    // cs_ for too long, the WS thread will block here and the cache will
+    // appear stale. These counters expose that contention.
+
+    DWORD getLongestSetBidAskWaitMs() const { return longestSetBidAskWaitMs_.load(); }
+    uint64_t getSetBidAskLongWaitCount() const { return setBidAskLongWaitCount_.load(); }
+    void resetWsHotPathStats() {
+        longestSetBidAskWaitMs_ = 0;
+        setBidAskLongWaitCount_ = 0;
+    }
+
 private:
     mutable CRITICAL_SECTION cs_;
 
@@ -124,6 +140,10 @@ private:
 
     DWORD lastOpenOrdersUpdate_;
     DWORD lastPositionsUpdate_;
+
+    // [OPM-550] H3 instrumentation
+    std::atomic<DWORD> longestSetBidAskWaitMs_;
+    std::atomic<uint64_t> setBidAskLongWaitCount_;
 
     static const size_t MAX_FILLS = 100;
 };

@@ -91,6 +91,13 @@ public:
     time_t lastMessageTime() const { return lastMessageTime_.load(); }
     DWORD getLastError() const { return lastError_; }
 
+    // [OPM-550] H2 instrumentation: counts WebSocket Message frames received
+    // by the IXWebSocket internal thread vs the number our poll() has
+    // dispatched. Divergence between the two indicates which side of the
+    // queue is stalled (IX internal thread vs our connection thread).
+    uint64_t getIxMessageCount() const { return ixMessageCount_.load(); }
+    uint64_t getPollDispatchCount() const { return pollDispatchCount_.load(); }
+
     /// Reason for the most recent disconnect
     DisconnectReason disconnectReason() const { return disconnectReason_.load(); }
     /// Error code when disconnectReason == NetworkError
@@ -151,6 +158,10 @@ private:
     MessageHandler messageHandler_;
     LogCallback logCallback_;
     int logLevel_;
+
+    // [OPM-550] H2 instrumentation counters
+    std::atomic<uint64_t> ixMessageCount_;
+    std::atomic<uint64_t> pollDispatchCount_;
 
     // IXWebSocket message callback (fires on IX internal thread)
     void onIxMessage(const ix::WebSocketMessagePtr& msg);

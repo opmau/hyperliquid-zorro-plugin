@@ -183,18 +183,39 @@ void TradingState::removeOrder(int tradeId) {
 }
 
 // =============================================================================
-// LOGGER IMPLEMENTATION
+// LOGGER IMPLEMENTATION [OPM-550]
+// Async producer/consumer queue. See header for design rationale.
 // =============================================================================
 
-void Logger::log(int minLevel, const char* msg) const {
-    if (!callback || !msg) return;
-    if (level.load() >= minLevel) {
-        callback(msg);
-    }
+Logger::Logger() {
+    InitializeCriticalSection(&cs_);
 }
 
-void Logger::logf(int minLevel, const char* fmt, ...) const {
-    if (!callback || !fmt) return;
+Logger::~Logger() {
+    // Discard queue without invoking callback — at static destruction time
+    // the BrokerMessage function pointer may already be invalid.
+    EnterCriticalSection(&cs_);
+    queue_.clear();
+    LeaveCriticalSection(&cs_);
+    DeleteCriticalSection(&cs_);
+}
+
+void Logger::log(int minLevel, const char* msg) {
+    if (!msg) return;
+    if (level.load() < minLevel) return;
+
+    EnterCriticalSection(&cs_);
+    if (queue_.size() >= MAX_QUEUE_DEPTH) {
+        // Drop oldest to bound memory; producer must never block.
+        queue_.pop_front();
+        dropped_.fetch_add(1, std::memory_order_relaxed);
+    }
+    queue_.emplace_back(msg);
+    LeaveCriticalSection(&cs_);
+}
+
+void Logger::logf(int minLevel, const char* fmt, ...) {
+    if (!fmt) return;
     if (level.load() < minLevel) return;
 
     char buf[2048];
@@ -204,7 +225,100 @@ void Logger::logf(int minLevel, const char* fmt, ...) const {
     va_end(args);
     buf[sizeof(buf) - 1] = 0;
 
-    callback(buf);
+    EnterCriticalSection(&cs_);
+    if (queue_.size() >= MAX_QUEUE_DEPTH) {
+        queue_.pop_front();
+        dropped_.fetch_add(1, std::memory_order_relaxed);
+    }
+    queue_.emplace_back(buf);
+    LeaveCriticalSection(&cs_);
+}
+
+size_t Logger::drain(size_t maxMessages) {
+    if (!callback) {
+        // No callback yet — just discard to prevent unbounded growth.
+        EnterCriticalSection(&cs_);
+        size_t n = queue_.size();
+        if (n > maxMessages) n = maxMessages;
+        for (size_t i = 0; i < n; ++i) queue_.pop_front();
+        LeaveCriticalSection(&cs_);
+        return n;
+    }
+
+    size_t drained = 0;
+    while (drained < maxMessages) {
+        std::string msg;
+        EnterCriticalSection(&cs_);
+        if (queue_.empty()) {
+            LeaveCriticalSection(&cs_);
+            break;
+        }
+        msg = std::move(queue_.front());
+        queue_.pop_front();
+        LeaveCriticalSection(&cs_);
+
+        // Synchronous BrokerMessage call is safe here — main thread.
+        callback(msg.c_str());
+        drained++;
+    }
+
+    // Surface dropped-count when it changes — operator visibility.
+    // lastReportedDrops_ is accessed only here (main thread / drain only).
+    uint64_t now = dropped_.load(std::memory_order_relaxed);
+    if (now > lastReportedDrops_) {
+        char warn[160];
+        snprintf(warn, sizeof(warn),
+                 "WARN [OPM-550] Logger dropped %llu messages (queue overflow)",
+                 (unsigned long long)(now - lastReportedDrops_));
+        if (callback) callback(warn);
+        lastReportedDrops_ = now;
+    }
+    return drained;
+}
+
+void Logger::enqueue(const char* msg) {
+    // Bypass level check — caller (typically ws_manager / ws_connection) has
+    // already filtered. Just enqueue with overflow protection.
+    if (!msg) return;
+    EnterCriticalSection(&cs_);
+    if (queue_.size() >= MAX_QUEUE_DEPTH) {
+        queue_.pop_front();
+        dropped_.fetch_add(1, std::memory_order_relaxed);
+    }
+    queue_.emplace_back(msg);
+    LeaveCriticalSection(&cs_);
+}
+
+void Logger::flush() {
+    if (!callback) {
+        EnterCriticalSection(&cs_);
+        queue_.clear();
+        LeaveCriticalSection(&cs_);
+        return;
+    }
+    while (true) {
+        std::string msg;
+        EnterCriticalSection(&cs_);
+        if (queue_.empty()) {
+            LeaveCriticalSection(&cs_);
+            break;
+        }
+        msg = std::move(queue_.front());
+        queue_.pop_front();
+        LeaveCriticalSection(&cs_);
+        callback(msg.c_str());
+    }
+}
+
+size_t Logger::queueDepth() const {
+    EnterCriticalSection(&cs_);
+    size_t n = queue_.size();
+    LeaveCriticalSection(&cs_);
+    return n;
+}
+
+uint64_t Logger::messagesDropped() const {
+    return dropped_.load(std::memory_order_relaxed);
 }
 
 // =============================================================================

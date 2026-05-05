@@ -39,6 +39,12 @@ WebSocketManager::WebSocketManager(PriceCache& cache)
     InitializeCriticalSection(&postCs_);
     InitializeCriticalSection(&responseCs_);
     InitializeCriticalSection(&indexMapCs_);
+    // [OPM-550] Phase 1.6 — zero per-channel timing stats
+    for (int i = 0; i < CK_COUNT; ++i) {
+        channelStats_[i].totalMs = 0;
+        channelStats_[i].maxMs = 0;
+        channelStats_[i].count = 0;
+    }
 }
 
 WebSocketManager::~WebSocketManager() {
@@ -182,8 +188,39 @@ void WebSocketManager::connectionLoop() {
     const int MAX_CONSECUTIVE_RECONNECTS = 15;
     const DWORD CIRCUIT_COOLDOWN_MS = 300000;  // 5 minutes
 
+    // [OPM-550] H1 instrumentation: per-iteration tick tracking + per-minute
+    // diagnostic summary. Distinguishes which subsystem stalls during fallback
+    // storms — see OPM-550 hypothesis matrix in opm-ws-stall-investigation.md.
+    DWORD lastDiagTick = GetTickCount();
+    DWORD prevTickTime = lastDiagTick;
+    DWORD loopTickCount = 0;
+    DWORD longestTickIntervalMs = 0;
+    uint64_t lastIxMsgSnapshot = 0;
+    uint64_t lastPollDispatchSnapshot = 0;
+    const DWORD DIAG_INTERVAL_MS = 60000;  // 1 minute
+
+    // [OPM-550] Phase 1.5 — per-phase max time tracking inside the loop body.
+    // H1 confirmed (10-20s tick gaps) but we don't yet know which phase.
+    DWORD maxPhaseMs = 0;
+    const char* maxPhaseName = "none";
+
     while (running_) {
         if (WaitForSingleObject(shutdownEvent_, 0) == WAIT_OBJECT_0) break;
+
+        // [OPM-550] Phase 1.5: time each major phase per iteration; remember
+        // the slowest single-phase observation in the current diag window.
+        DWORD phaseStart = GetTickCount();
+        DWORD phaseEnd;
+        DWORD phaseMs;
+        #define HL550_PHASE(name) do {                                    \
+            phaseEnd = GetTickCount();                                    \
+            phaseMs = phaseEnd - phaseStart;                              \
+            if (phaseMs > maxPhaseMs) {                                   \
+                maxPhaseMs = phaseMs;                                     \
+                maxPhaseName = name;                                      \
+            }                                                             \
+            phaseStart = phaseEnd;                                        \
+        } while (0)
 
         // Check if IXWebSocket auto-reconnected [OPM-128]
         if (connection_.wasReconnected()) {
@@ -202,13 +239,19 @@ void WebSocketManager::connectionLoop() {
                 subscribeInitialChannels();
             }
         }
+        HL550_PHASE("reconnect");
 
         // Send pending work (only if connected)
         if (connection_.isConnected()) {
             sendPendingPosts();
+            HL550_PHASE("sendPosts");
+
             if (initialSubsQueued_) {
                 sendPendingL2Subscriptions();
+                HL550_PHASE("sendL2Subs");
+
                 sendPendingAccountSubscriptions();
+                HL550_PHASE("sendAcctSubs");
             }
 
             // HL application ping at reduced frequency [OPM-128]
@@ -219,6 +262,7 @@ void WebSocketManager::connectionLoop() {
                 connection_.send("{\"method\":\"ping\"}");
                 lastHlPingTick = now;
             }
+            HL550_PHASE("hlPing");
         }
 
         // Circuit breaker cooldown — probe reconnect
@@ -243,10 +287,75 @@ void WebSocketManager::connectionLoop() {
                 consecutiveReconnects_ = 0;
             }
         }
+        HL550_PHASE("circuitMisc");
 
         // Drain messages from IXWebSocket queue
         connection_.poll(100);
+        HL550_PHASE("poll");
+
         Sleep(10);
+        HL550_PHASE("sleep");
+
+        #undef HL550_PHASE
+
+        // [OPM-550] H1 instrumentation: track loop cadence + emit per-minute summary
+        DWORD nowTick = GetTickCount();
+        DWORD interval = nowTick - prevTickTime;
+        if (interval > longestTickIntervalMs) longestTickIntervalMs = interval;
+        prevTickTime = nowTick;
+        loopTickCount++;
+
+        if (nowTick - lastDiagTick >= DIAG_INTERVAL_MS) {
+            uint64_t ixMsgNow = connection_.getIxMessageCount();
+            uint64_t pollNow = connection_.getPollDispatchCount();
+            uint64_t ixDelta = ixMsgNow - lastIxMsgSnapshot;
+            uint64_t pollDelta = pollNow - lastPollDispatchSnapshot;
+            DWORD csMaxWait = cache_.getLongestSetBidAskWaitMs();
+            uint64_t csLongWaits = cache_.getSetBidAskLongWaitCount();
+
+            logf(1,
+                 "WS DIAG [OPM-550] ticks=%lu longestTickGap=%lums "
+                 "ixMsg=+%llu pollDisp=+%llu queueLag=%lld "
+                 "cacheCsMaxWait=%lums longCsWaits=%llu "
+                 "maxPhase=%s/%lums",
+                 (unsigned long)loopTickCount,
+                 (unsigned long)longestTickIntervalMs,
+                 (unsigned long long)ixDelta,
+                 (unsigned long long)pollDelta,
+                 (long long)(ixMsgNow - pollNow),
+                 (unsigned long)csMaxWait,
+                 (unsigned long long)csLongWaits,
+                 maxPhaseName,
+                 (unsigned long)maxPhaseMs);
+
+            // [OPM-550] Phase 1.6 — per-channel handler timing breakdown
+            for (int i = 0; i < CK_COUNT; ++i) {
+                if (channelStats_[i].count > 0) {
+                    logf(1,
+                         "WS DIAG [OPM-550]   ch=%-12s count=%llu totalMs=%llu "
+                         "maxMs=%lu avgMs=%.2f",
+                         channelKindName(i),
+                         (unsigned long long)channelStats_[i].count,
+                         (unsigned long long)channelStats_[i].totalMs,
+                         (unsigned long)channelStats_[i].maxMs,
+                         channelStats_[i].count > 0
+                             ? (double)channelStats_[i].totalMs / (double)channelStats_[i].count
+                             : 0.0);
+                }
+                channelStats_[i].totalMs = 0;
+                channelStats_[i].maxMs = 0;
+                channelStats_[i].count = 0;
+            }
+
+            lastDiagTick = nowTick;
+            lastIxMsgSnapshot = ixMsgNow;
+            lastPollDispatchSnapshot = pollNow;
+            loopTickCount = 0;
+            longestTickIntervalMs = 0;
+            maxPhaseMs = 0;
+            maxPhaseName = "none";
+            cache_.resetWsHotPathStats();
+        }
     }
 
     log(1, "WS: Connection loop exited");
@@ -579,6 +688,18 @@ OrderResponse WebSocketManager::sendOrderSync(const std::string& orderJson, DWOR
 
 // --- Message Handling ---
 
+const char* WebSocketManager::channelKindName(int k) {
+    switch (k) {
+        case CK_L2BOOK:        return "l2Book";
+        case CK_CLEARING:      return "clearing";
+        case CK_OPEN_ORDERS:   return "openOrders";
+        case CK_USER_FILLS:    return "userFills";
+        case CK_ORDER_UPDATES: return "orderUpdates";
+        case CK_POST:          return "post";
+        default:               return "other";
+    }
+}
+
 void WebSocketManager::handleMessage(const char* data, size_t len) {
     // Parse JSON once to extract channel for routing
     yyjson_doc* doc = yyjson_read(data, len, 0);
@@ -589,13 +710,18 @@ void WebSocketManager::handleMessage(const char* data, size_t len) {
     yyjson_val* root = yyjson_doc_get_root(doc);
     const char* channel = json::getStringPtr(root, "channel");
 
+    // [OPM-550] Phase 1.6 — time the parser dispatch per channel kind.
+    // Same-thread access (connection thread only); no atomicity needed.
+    DWORD parseStart = GetTickCount();
+    int kind = CK_OTHER;
+
     if (channel) {
-        if (strcmp(channel, "l2Book") == 0) parseL2Book(data);
-        else if (strcmp(channel, "clearinghouseState") == 0) parseClearinghouseState(data);
-        else if (strcmp(channel, "openOrders") == 0) parseOpenOrders(data);
-        else if (strcmp(channel, "userFills") == 0) parseUserFills(data);
-        else if (strcmp(channel, "orderUpdates") == 0) parseOrderUpdates(data);
-        else if (strcmp(channel, "post") == 0) parsePostResponse(data);
+        if (strcmp(channel, "l2Book") == 0)              { kind = CK_L2BOOK;        parseL2Book(data); }
+        else if (strcmp(channel, "clearinghouseState") == 0) { kind = CK_CLEARING;     parseClearinghouseState(data); }
+        else if (strcmp(channel, "openOrders") == 0)     { kind = CK_OPEN_ORDERS;   parseOpenOrders(data); }
+        else if (strcmp(channel, "userFills") == 0)      { kind = CK_USER_FILLS;    parseUserFills(data); }
+        else if (strcmp(channel, "orderUpdates") == 0)   { kind = CK_ORDER_UPDATES; parseOrderUpdates(data); }
+        else if (strcmp(channel, "post") == 0)           { kind = CK_POST;          parsePostResponse(data); }
         else if (strcmp(channel, "pong") == 0) { /* expected, ignore */ }
         else if (strcmp(channel, "subscriptionResponse") == 0) {
             if (diagLevel_ >= 2) logf(2, "WS: Subscription ACK (%zu bytes)", len);
@@ -626,9 +752,15 @@ void WebSocketManager::handleMessage(const char* data, size_t len) {
         }
     } else {
         // No channel field — check for order response without channel wrapper
-        if (yyjson_obj_get(root, "response")) parsePostResponse(data);
+        if (yyjson_obj_get(root, "response")) { kind = CK_POST; parsePostResponse(data); }
         else if (diagLevel_ >= 2) logf(2, "WS: No channel in message (%zu bytes): %.120s", len, data);
     }
+
+    // [OPM-550] Phase 1.6 — record dispatch time for this channel kind
+    DWORD parseMs = GetTickCount() - parseStart;
+    channelStats_[kind].count++;
+    channelStats_[kind].totalMs += parseMs;
+    if (parseMs > channelStats_[kind].maxMs) channelStats_[kind].maxMs = parseMs;
 
     yyjson_doc_free(doc);
 }

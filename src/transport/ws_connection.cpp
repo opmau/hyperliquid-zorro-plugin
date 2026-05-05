@@ -32,7 +32,8 @@ Connection::Connection()
       connected_(false), state_(ConnectionState::Disconnected),
       lastMessageTime_(0), lastError_(0),
       disconnectReason_(DisconnectReason::None), disconnectError_(0),
-      messageHandler_(nullptr), logCallback_(nullptr), logLevel_(0) {
+      messageHandler_(nullptr), logCallback_(nullptr), logLevel_(0),
+      ixMessageCount_(0), pollDispatchCount_(0) {
     InitializeCriticalSection(&queueCs_);
     queueEvent_ = CreateEvent(NULL, TRUE, FALSE, NULL);  // Manual-reset
     ws_.disableAutomaticReconnection();
@@ -168,6 +169,7 @@ void Connection::onIxMessage(const ix::WebSocketMessagePtr& msg) {
         case ix::WebSocketMessageType::Message:
             // Queue the message for poll() to dispatch on caller's thread
             if (!msg->str.empty()) {
+                ixMessageCount_++;  // [OPM-550] H2 — count IX-thread receives
                 EnterCriticalSection(&queueCs_);
                 messageQueue_.push({msg->str});
                 LeaveCriticalSection(&queueCs_);
@@ -342,9 +344,17 @@ int Connection::poll(int timeoutMs) {
         return -1;
     }
 
-    // Drain all available messages
+    // [OPM-550] Bounded drain — prevents one slow handler or a queue spike
+    // from monopolizing the WS connection loop. Two independent caps:
+    //   * MAX_DISPATCH_PER_POLL — hard cap on messages per poll() call.
+    //   * MAX_DISPATCH_MS       — wall-clock cap; checked between handlers.
+    // Either trips, we return so the loop can run sends/ping/circuit checks.
+    static const int   MAX_DISPATCH_PER_POLL = 256;
+    static const DWORD MAX_DISPATCH_MS       = 50;
+    DWORD dispatchStart = GetTickCount();
+
     int messagesProcessed = 0;
-    while (true) {
+    while (messagesProcessed < MAX_DISPATCH_PER_POLL) {
         EnterCriticalSection(&queueCs_);
         if (messageQueue_.empty()) {
             LeaveCriticalSection(&queueCs_);
@@ -358,7 +368,12 @@ int Connection::poll(int timeoutMs) {
         if (messageHandler_) {
             messageHandler_(msg.data.c_str(), msg.data.size());
         }
+        pollDispatchCount_++;  // [OPM-550] H2 — count caller-thread dispatches
         messagesProcessed++;
+
+        // Wall-clock budget — yield back to connection loop if a single
+        // handler or a burst pushed us past MAX_DISPATCH_MS.
+        if (GetTickCount() - dispatchStart >= MAX_DISPATCH_MS) break;
     }
 
     return messagesProcessed;

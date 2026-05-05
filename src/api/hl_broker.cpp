@@ -88,9 +88,23 @@ void zorroQuit(const char* reason) {
     }
 }
 
-// Zorro callback wrapper for logging
-static int zorroLogCallback(const char* msg) {
+// [OPM-550] Two distinct logging callbacks:
+//
+//   sinkToBrokerMessage (Logger::callback) — synchronous BrokerMessage call.
+//     Invoked ONLY from Logger::drain() on the main (Zorro) thread.
+//
+//   enqueueLogAsync (ws_manager::logCallback_) — non-blocking enqueue.
+//     Invoked from any thread (especially WS connection thread).
+//
+// Splitting these prevents (a) the SendMessage-on-WS-thread blocking that
+// caused OPM-550 and (b) infinite recursion if Logger::callback ever indirectly
+// called Logger::log/enqueue.
+static int sinkToBrokerMessage(const char* msg) {
     if (BrokerMessage) return BrokerMessage(msg);
+    return 0;
+}
+static int enqueueLogAsync(const char* msg) {
+    hl::g_logger.enqueue(msg);
     return 0;
 }
 
@@ -202,7 +216,9 @@ DLLFUNC int BrokerOpen(char* name, FARPROC fpMessage, FARPROC fpProgress) {
     hl::g_logger.level = 2;
 #endif
 
-    hl::g_logger.callback = zorroLogCallback;
+    // [OPM-550] g_logger.callback fires from drain() on main thread only —
+    // safe to call BrokerMessage synchronously here.
+    hl::g_logger.callback = sinkToBrokerMessage;
 
     if (!hl::crypto::init()) {
         if (BrokerMessage) {
@@ -356,7 +372,10 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
             if (!hl::g_wsManager) {
                 auto* wsMgr = new hl::ws::WebSocketManager(*priceCache);
                 wsMgr->setDiagLevel(hl::g_config.diagLevel);
-                wsMgr->setLogCallback(zorroLogCallback);
+                // [OPM-550] WS-thread logging must NEVER touch SendMessage(GUI).
+                // enqueueLogAsync drops messages into g_logger's bounded queue;
+                // BrokerTime/BrokerCommand drain it on the main thread.
+                wsMgr->setLogCallback(enqueueLogAsync);
                 wsMgr->setOrderUpdateCallback(onOrderUpdate);
                 wsMgr->setFillNotifyCallback(onFillNotify);
                 wsMgr->setUserAddress(hl::g_config.walletAddress);
@@ -396,6 +415,10 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
         g_everReceivedAccountData = false;
         g_lastHttpFallbackTime = 0;
 
+        // [OPM-550] Flush async log queue BEFORE tearing down the WS manager
+        // so any final messages reach Zorro while BrokerMessage is still valid.
+        hl::g_logger.flush();
+
         hl::market::cleanup();
         hl::trading::cleanup();
 
@@ -411,6 +434,9 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
             hl::g_priceCache = nullptr;
         }
 
+        // [OPM-550] Flush any messages enqueued during stop/cleanup.
+        hl::g_logger.flush();
+
         HWND savedWindow = hl::g_config.zorroWindow;
         SecureZeroMemory(&hl::g_config, sizeof(hl::g_config));
         hl::g_config.zorroWindow = savedWindow;
@@ -424,6 +450,11 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
 //=============================================================================
 
 DLLFUNC int BrokerTime(DATE *pTimeGMT) {
+    // [OPM-550] Drain async log queue on every tick. BrokerTime is the
+    // highest-frequency main-thread entry point (Zorro calls per tick),
+    // making it the ideal place to flush messages enqueued by the WS thread.
+    hl::g_logger.drain();
+
     if (!hl::g_config.walletAddress[0]) return 0;
 
     if (pTimeGMT) {
@@ -439,6 +470,10 @@ DLLFUNC int BrokerTime(DATE *pTimeGMT) {
 //=============================================================================
 
 DLLFUNC double BrokerCommand(int mode, intptr_t parameter) {
+    // [OPM-550] Drain async log queue (in case BrokerTime hasn't been called
+    // recently — BrokerCommand is also called frequently from strategy code).
+    hl::g_logger.drain();
+
     double result = handleBrokerCommand(mode, parameter);
     if (hl::g_config.diagLevel >= 3 && mode != GET_VOLUME) {
         hl::g_logger.logf(3, "BrokerCommand: mode=%d param=%lld -> %.4f",
