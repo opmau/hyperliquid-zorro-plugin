@@ -267,8 +267,11 @@ static bool s_perpDexPositionsFetched = false;
 static void refreshPerpDexPositions() {
     auto dexes = getActivePerpDexNames();
     if (dexes.empty()) {
-        if (g_config.diagLevel >= 1) {
-            g_logger.logf(1, "refreshPerpDexPositions: no active perpDex names (g_assets has %d assets)",
+        // Expected steady state when no perpDex subscribed — verbose only.
+        // Was level 1 → flooded the async log queue every BrokerAccount tick,
+        // risking real-message drops. [OPM-550 follow-up]
+        if (g_config.diagLevel >= 3) {
+            g_logger.logf(3, "refreshPerpDexPositions: no active perpDex names (g_assets has %d assets)",
                          g_assets.count);
         }
         return;

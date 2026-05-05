@@ -8,6 +8,7 @@
 //=============================================================================
 
 #include "ws_price_cache.h"
+#include "../foundation/hl_globals.h"  // [OPM-550] g_config.diagLevel for H3 gating
 
 namespace hl {
 namespace ws {
@@ -39,15 +40,19 @@ void PriceCache::setPrice(const std::string& coin, double price) {
 
 void PriceCache::setBidAsk(const std::string& coin, double bid, double ask) {
     // [OPM-550] H3 instrumentation: time the lock acquire on the WS hot path.
-    DWORD beforeAcquire = GetTickCount();
+    // Runtime-gated on g_config.diagLevel >= 3.
+    const bool diagOn = (g_config.diagLevel >= 3);
+    DWORD beforeAcquire = diagOn ? GetTickCount() : 0;
     EnterCriticalSection(&cs_);
-    DWORD waitMs = GetTickCount() - beforeAcquire;
-    if (waitMs > 100) {
-        setBidAskLongWaitCount_++;
-        DWORD prevMax = longestSetBidAskWaitMs_.load();
-        while (waitMs > prevMax &&
-               !longestSetBidAskWaitMs_.compare_exchange_weak(prevMax, waitMs)) {
-            // retry until we've installed the new max (or someone else beat us to a higher value)
+    if (diagOn) {
+        DWORD waitMs = GetTickCount() - beforeAcquire;
+        if (waitMs > 100) {
+            setBidAskLongWaitCount_++;
+            DWORD prevMax = longestSetBidAskWaitMs_.load();
+            while (waitMs > prevMax &&
+                   !longestSetBidAskWaitMs_.compare_exchange_weak(prevMax, waitMs)) {
+                // retry until we've installed the new max
+            }
         }
     }
     prices_[coin].bid = bid;
