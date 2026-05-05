@@ -188,9 +188,9 @@ void WebSocketManager::connectionLoop() {
     const int MAX_CONSECUTIVE_RECONNECTS = 15;
     const DWORD CIRCUIT_COOLDOWN_MS = 300000;  // 5 minutes
 
-    // [OPM-550] H1 instrumentation: per-iteration tick tracking + per-minute
-    // diagnostic summary. Distinguishes which subsystem stalls during fallback
-    // storms — see OPM-550 hypothesis matrix in opm-ws-stall-investigation.md.
+    // [OPM-550] Diagnostic instrumentation — runtime-gated on diagLevel_ >= 3.
+    // Off by default (zero overhead). Operator can re-enable mid-run via
+    // SET_DIAGNOSTICS=3 to bring full Phase 1/1.5/1.6 telemetry back online.
     DWORD lastDiagTick = GetTickCount();
     DWORD prevTickTime = lastDiagTick;
     DWORD loopTickCount = 0;
@@ -198,28 +198,42 @@ void WebSocketManager::connectionLoop() {
     uint64_t lastIxMsgSnapshot = 0;
     uint64_t lastPollDispatchSnapshot = 0;
     const DWORD DIAG_INTERVAL_MS = 60000;  // 1 minute
-
-    // [OPM-550] Phase 1.5 — per-phase max time tracking inside the loop body.
-    // H1 confirmed (10-20s tick gaps) but we don't yet know which phase.
     DWORD maxPhaseMs = 0;
     const char* maxPhaseName = "none";
+    bool prevDiagOn = false;
 
     while (running_) {
         if (WaitForSingleObject(shutdownEvent_, 0) == WAIT_OBJECT_0) break;
 
-        // [OPM-550] Phase 1.5: time each major phase per iteration; remember
-        // the slowest single-phase observation in the current diag window.
-        DWORD phaseStart = GetTickCount();
+        // [OPM-550] Re-check gate per iteration so SET_DIAGNOSTICS takes effect live.
+        const bool diagOn = (diagLevel_ >= 3);
+        if (diagOn && !prevDiagOn) {
+            // Transition off→on: reset snapshots so the first window starts clean.
+            prevTickTime = GetTickCount();
+            lastDiagTick = prevTickTime;
+            loopTickCount = 0;
+            longestTickIntervalMs = 0;
+            maxPhaseMs = 0;
+            maxPhaseName = "none";
+            lastIxMsgSnapshot = connection_.getIxMessageCount();
+            lastPollDispatchSnapshot = connection_.getPollDispatchCount();
+            cache_.resetWsHotPathStats();
+        }
+        prevDiagOn = diagOn;
+
+        DWORD phaseStart = diagOn ? GetTickCount() : 0;
         DWORD phaseEnd;
         DWORD phaseMs;
         #define HL550_PHASE(name) do {                                    \
-            phaseEnd = GetTickCount();                                    \
-            phaseMs = phaseEnd - phaseStart;                              \
-            if (phaseMs > maxPhaseMs) {                                   \
-                maxPhaseMs = phaseMs;                                     \
-                maxPhaseName = name;                                      \
+            if (diagOn) {                                                 \
+                phaseEnd = GetTickCount();                                \
+                phaseMs = phaseEnd - phaseStart;                          \
+                if (phaseMs > maxPhaseMs) {                               \
+                    maxPhaseMs = phaseMs;                                 \
+                    maxPhaseName = name;                                  \
+                }                                                         \
+                phaseStart = phaseEnd;                                    \
             }                                                             \
-            phaseStart = phaseEnd;                                        \
         } while (0)
 
         // Check if IXWebSocket auto-reconnected [OPM-128]
@@ -297,6 +311,8 @@ void WebSocketManager::connectionLoop() {
         HL550_PHASE("sleep");
 
         #undef HL550_PHASE
+
+        if (!diagOn) continue;  // [OPM-550] Skip diag bookkeeping when gated off.
 
         // [OPM-550] H1 instrumentation: track loop cadence + emit per-minute summary
         DWORD nowTick = GetTickCount();
@@ -711,8 +727,9 @@ void WebSocketManager::handleMessage(const char* data, size_t len) {
     const char* channel = json::getStringPtr(root, "channel");
 
     // [OPM-550] Phase 1.6 — time the parser dispatch per channel kind.
-    // Same-thread access (connection thread only); no atomicity needed.
-    DWORD parseStart = GetTickCount();
+    // Runtime-gated on diagLevel_ >= 3. Same-thread access (connection thread only).
+    const bool diagOn = (diagLevel_ >= 3);
+    DWORD parseStart = diagOn ? GetTickCount() : 0;
     int kind = CK_OTHER;
 
     if (channel) {
@@ -756,11 +773,13 @@ void WebSocketManager::handleMessage(const char* data, size_t len) {
         else if (diagLevel_ >= 2) logf(2, "WS: No channel in message (%zu bytes): %.120s", len, data);
     }
 
-    // [OPM-550] Phase 1.6 — record dispatch time for this channel kind
-    DWORD parseMs = GetTickCount() - parseStart;
-    channelStats_[kind].count++;
-    channelStats_[kind].totalMs += parseMs;
-    if (parseMs > channelStats_[kind].maxMs) channelStats_[kind].maxMs = parseMs;
+    // [OPM-550] Phase 1.6 — record dispatch time for this channel kind (gated)
+    if (diagOn) {
+        DWORD parseMs = GetTickCount() - parseStart;
+        channelStats_[kind].count++;
+        channelStats_[kind].totalMs += parseMs;
+        if (parseMs > channelStats_[kind].maxMs) channelStats_[kind].maxMs = parseMs;
+    }
 
     yyjson_doc_free(doc);
 }
