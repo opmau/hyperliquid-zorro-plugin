@@ -12,6 +12,11 @@
 // - Order cancellation
 // - Trade ID management (Zorro <-> Hyperliquid mapping)
 // - Order status tracking
+//
+// Protocol reference (verified 2026-05-06):
+//   https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint
+// Action types covered: order, cancel, cancelByCloid, batchModify, modify,
+//                       scheduleCancel, twapOrder, twapCancel
 //=============================================================================
 
 #pragma once

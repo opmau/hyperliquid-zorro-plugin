@@ -12,6 +12,11 @@
 // - Historical candle data fetching
 // - Asset metadata access (via hl_meta)
 // - HTTP seed cooldown management
+//
+// Protocol reference (verified 2026-05-06):
+//   https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint
+// Info request types covered: l2Book, allMids, candleSnapshot, meta, spotMeta,
+//                              clearinghouseState, openOrders, userFills
 //=============================================================================
 
 #pragma once

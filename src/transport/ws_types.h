@@ -7,6 +7,12 @@
 // DEPENDENCIES: <windows.h>, <string>
 // THREAD SAFETY: All structures are POD or simple types (thread-safety
 //                depends on external synchronization)
+//
+// Protocol reference (verified 2026-05-06):
+//   https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket
+// Subscriptions documented:
+//   l2Book, allMids, candle, trades, orderUpdates, userEvents, userFills,
+//   webData2, notification, activeAssetCtx, activeAssetData
 //=============================================================================
 
 #pragma once

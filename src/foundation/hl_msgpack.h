@@ -8,6 +8,13 @@
 // This provides a minimal MessagePack encoder implementing only the subset
 // needed for Hyperliquid order action encoding. The format must match the
 // Python SDK exactly for signature compatibility.
+//
+// Protocol reference (verified 2026-05-06):
+//   https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint
+// Action signing (msgpack input to phantomAgent hash):
+//   https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/signing
+// Reference Python implementation (action_hash):
+//   https://github.com/hyperliquid-dex/hyperliquid-python-sdk
 //=============================================================================
 
 #pragma once

@@ -9,6 +9,11 @@
 // Hyperliquid uses this for cryptographically signing orders and cancellations.
 //
 // Flow: OrderAction -> MsgPack encode -> Keccak256 -> EIP-712 wrap -> Sign
+//
+// Protocol references (verified 2026-05-06):
+//   EIP-712 spec:    https://eips.ethereum.org/EIPS/eip-712
+//   HL signing:      https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/signing
+//   HL phantomAgent: domain="Exchange" / type="Agent" with source+connectionId fields
 //=============================================================================
 
 #pragma once
