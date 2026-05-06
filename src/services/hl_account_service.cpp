@@ -363,37 +363,18 @@ PositionInfo getPosition(const char* coin) {
     // Ensure we have position data (WS or HTTP fallback) [OPM-134]
     ensurePositionData();
 
-    // Read from cache (works for both WS and HTTP-populated data)
+    // Read from cache (works for both WS and HTTP-populated data).
+    //
+    // [OPM-555] Cache keys are normalized at write time:
+    //   - Main-dex positions stored as bare "COIN" (ws_parsers.cpp)
+    //   - perpDex positions stored as "dex:COIN" (ws_parsers.cpp:202-209)
+    // Callers in hl_broker.cpp use buildCoinForApi() which produces the same
+    // format. An exact match is therefore the only correct lookup — earlier
+    // OPM-219 fallbacks that stripped/added prefixes returned WRONG-DEX
+    // positions when an asset existed on one dex but not the other.
     if (g_priceCache) {
         auto* cache = reinterpret_cast<hl::ws::PriceCache*>(g_priceCache);
         ws::PositionData wsPos = cache->getPosition(std::string(coin));
-
-        // [OPM-219] Fallback: "dex:COIN" didn't match, try bare coin
-        if (wsPos.size == 0 && strchr(coin, ':')) {
-            std::string bareCoin(strchr(coin, ':') + 1);
-            wsPos = cache->getPosition(bareCoin);
-            if (wsPos.size != 0 && g_config.diagLevel >= 1) {
-                g_logger.logf(1, "getPosition: '%s' not found, bare '%s' matched (size=%.6f)",
-                              coin, bareCoin.c_str(), wsPos.size);
-            }
-        }
-
-        // [OPM-219] Fallback: bare "COIN" didn't match, try "dex:COIN"
-        if (wsPos.size == 0 && !strchr(coin, ':')) {
-            for (int i = 0; i < g_assets.count; ++i) {
-                const AssetInfo* a = g_assets.getByIndex(i);
-                if (a && a->isPerpDex && a->perpDex[0]
-                    && _stricmp(a->coin, coin) == 0) {
-                    std::string prefixed = std::string(a->perpDex) + ":" + coin;
-                    wsPos = cache->getPosition(prefixed);
-                    if (wsPos.size != 0 && g_config.diagLevel >= 1) {
-                        g_logger.logf(1, "getPosition: bare '%s' not found, prefixed '%s' matched (size=%.6f)",
-                                      coin, prefixed.c_str(), wsPos.size);
-                    }
-                    break;
-                }
-            }
-        }
 
         if (wsPos.size != 0) {
             result.coin = wsPos.coin;
