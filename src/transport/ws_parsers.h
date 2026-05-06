@@ -13,6 +13,11 @@
 // - openOrders: resting orders snapshot
 // - userFills: trade fill events
 // - post response: order confirmation/rejection
+//
+// Protocol reference (verified 2026-05-06):
+//   https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket
+// Channel payload shapes:
+//   https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions
 //=============================================================================
 
 #pragma once
