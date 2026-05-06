@@ -11,6 +11,7 @@
 #include "ws_parsers.h"
 #include "json_helpers.h"
 #include "../foundation/hl_globals.h"
+#include "../foundation/hl_protocol.h"
 #include <IXNetSystem.h>
 #include <cstdio>
 #include <cstdarg>
@@ -705,13 +706,14 @@ OrderResponse WebSocketManager::sendOrderSync(const std::string& orderJson, DWOR
 // --- Message Handling ---
 
 const char* WebSocketManager::channelKindName(int k) {
+    namespace ch = hl::protocol::ws_channel;
     switch (k) {
-        case CK_L2BOOK:        return "l2Book";
-        case CK_CLEARING:      return "clearing";
-        case CK_OPEN_ORDERS:   return "openOrders";
-        case CK_USER_FILLS:    return "userFills";
-        case CK_ORDER_UPDATES: return "orderUpdates";
-        case CK_POST:          return "post";
+        case CK_L2BOOK:        return ch::L2_BOOK;
+        case CK_CLEARING:      return "clearing";  // diagnostic alias for CLEARINGHOUSE_STATE
+        case CK_OPEN_ORDERS:   return ch::OPEN_ORDERS;
+        case CK_USER_FILLS:    return ch::USER_FILLS;
+        case CK_ORDER_UPDATES: return ch::ORDER_UPDATES;
+        case CK_POST:          return ch::POST;
         default:               return "other";
     }
 }
@@ -733,17 +735,18 @@ void WebSocketManager::handleMessage(const char* data, size_t len) {
     int kind = CK_OTHER;
 
     if (channel) {
-        if (strcmp(channel, "l2Book") == 0)              { kind = CK_L2BOOK;        parseL2Book(data); }
-        else if (strcmp(channel, "clearinghouseState") == 0) { kind = CK_CLEARING;     parseClearinghouseState(data); }
-        else if (strcmp(channel, "openOrders") == 0)     { kind = CK_OPEN_ORDERS;   parseOpenOrders(data); }
-        else if (strcmp(channel, "userFills") == 0)      { kind = CK_USER_FILLS;    parseUserFills(data); }
-        else if (strcmp(channel, "orderUpdates") == 0)   { kind = CK_ORDER_UPDATES; parseOrderUpdates(data); }
-        else if (strcmp(channel, "post") == 0)           { kind = CK_POST;          parsePostResponse(data); }
-        else if (strcmp(channel, "pong") == 0) { /* expected, ignore */ }
-        else if (strcmp(channel, "subscriptionResponse") == 0) {
+        namespace ch = hl::protocol::ws_channel;
+        if (strcmp(channel, ch::L2_BOOK) == 0)              { kind = CK_L2BOOK;        parseL2Book(data); }
+        else if (strcmp(channel, ch::CLEARINGHOUSE_STATE) == 0) { kind = CK_CLEARING;     parseClearinghouseState(data); }
+        else if (strcmp(channel, ch::OPEN_ORDERS) == 0)     { kind = CK_OPEN_ORDERS;   parseOpenOrders(data); }
+        else if (strcmp(channel, ch::USER_FILLS) == 0)      { kind = CK_USER_FILLS;    parseUserFills(data); }
+        else if (strcmp(channel, ch::ORDER_UPDATES) == 0)   { kind = CK_ORDER_UPDATES; parseOrderUpdates(data); }
+        else if (strcmp(channel, ch::POST) == 0)            { kind = CK_POST;          parsePostResponse(data); }
+        else if (strcmp(channel, ch::PONG) == 0) { /* expected, ignore */ }
+        else if (strcmp(channel, ch::SUBSCRIPTION_RESPONSE) == 0) {
             if (diagLevel_ >= 2) logf(2, "WS: Subscription ACK (%zu bytes)", len);
         }
-        else if (strcmp(channel, "error") == 0) {
+        else if (strcmp(channel, ch::ERR) == 0) {
             // Log subscription errors (previously silently discarded) [OPM-74]
             const char* errData = json::getStringPtr(root, "data");
             logf(1, "WS ERROR from server: %s", errData ? errData : "(no details)");
