@@ -1,6 +1,6 @@
 # Testing
 
-Tests in this project are regression tests for bugs that caused real financial losses. Every test carries a commit hash or issue ID showing which bug it prevents.
+Tests in this project are regression tests for bugs that caused real financial losses. Every test carries a commit hash or short description of the bug it prevents.
 
 ---
 
@@ -30,24 +30,24 @@ compile_eip712_source_test.bat      # Just EIP-712 signing
 | 1 | `compile_broker_asset_test.bat` | PIP, PIPCost, LotAmount formulas + lot conversion | 6dfb104, 213643c, 8303e8b (profit display in millions) |
 | 2 | `compile_position_parsing_test.bat` | Multi-asset JSON position extraction | 81db4b6 (wrong asset's data returned) |
 | 3 | `compile_imported_test.bat` | IMPORTED trade position tracking | 18c287c (stale position data) |
-| 4 | `compile_eip712_source_test.bat` | EIP-712 source="a" (mainnet) vs "b" (testnet) | OPM-22 (orders rejected on testnet) |
+| 4 | `compile_eip712_source_test.bat` | EIP-712 source="a" (mainnet) vs "b" (testnet) | Orders rejected on testnet |
 | 5 | `compile_utils_test.bat` | Utility functions (string, time, numeric) | -- |
-| 6 | `compile_get_price_context_test.bat` | GET_PRICE uses priceSymbol, not currentSymbol | OPM-6 (wrong asset price) |
-| 7 | `compile_trigger_order_test.bat` | Trigger order JSON construction + STOP flag handling | OPM-77 (stop orders silently discarded) |
-| 8 | `compile_partial_fill_test.bat` | PartialFill detection + 0.999 threshold | OPM-91 (partial fills not detected) |
-| 9 | `compile_lotsize_divzero_test.bat` | Division-by-zero guard when lotSize=0 | OPM-158 (crash on uninitialized state) |
-| 10 | `compile_ws_parsers_test.bat` | All 6 WS message parsers (l2Book, allMids, clearinghouse, fills, orders, userEvents) | OPM-10 |
-| 11 | `compile_twap_test.bat` | TWAP order msgpack + EIP-712 signing | OPM-81 |
-| 12 | `compile_schedule_cancel_test.bat` | scheduleCancel signing (set + clear) | OPM-83 |
-| 13 | `compile_batch_modify_test.bat` | batchModify msgpack encoding | OPM-80 |
-| 14 | `compile_bracket_order_test.bat` | Bracket order encoding (entry + TP + SL) | OPM-79 |
-| 15 | `compile_trading_service_test.bat` | CLOID roundtrip, nonce monotonicity, TradeMap CRUD, fill status | OPM-9 |
-| 16 | `compile_account_service_test.bat` | Balance parsing, position parsing, HTTP fallback | OPM-9 |
-| 17 | `compile_market_service_test.bat` | Candle interval mapping, asset metadata, funding rate | OPM-9 |
-| 18 | `compile_market_service_http_test.bat` | Market service HTTP response parsing | OPM-9 |
-| 19 | `compile_account_service_http_test.bat` | Account service HTTP response parsing | OPM-9 |
-| 20 | `compile_account_service_ws_test.bat` | Account service WS cache interactions | OPM-9 |
-| 21 | `compile_market_service_ws_test.bat` | Market service WS cache interactions | OPM-9 |
+| 6 | `compile_get_price_context_test.bat` | GET_PRICE uses priceSymbol, not currentSymbol | Wrong asset price |
+| 7 | `compile_trigger_order_test.bat` | Trigger order JSON construction + STOP flag handling | Stop orders silently discarded |
+| 8 | `compile_partial_fill_test.bat` | PartialFill detection + 0.999 threshold | Partial fills not detected |
+| 9 | `compile_lotsize_divzero_test.bat` | Division-by-zero guard when lotSize=0 | Crash on uninitialized state |
+| 10 | `compile_ws_parsers_test.bat` | All 6 WS message parsers (l2Book, allMids, clearinghouse, fills, orders, userEvents) | WS parser regression |
+| 11 | `compile_twap_test.bat` | TWAP order msgpack + EIP-712 signing | TWAP signing regression |
+| 12 | `compile_schedule_cancel_test.bat` | scheduleCancel signing (set + clear) | scheduleCancel signing regression |
+| 13 | `compile_batch_modify_test.bat` | batchModify msgpack encoding | batchModify signing regression |
+| 14 | `compile_bracket_order_test.bat` | Bracket order encoding (entry + TP + SL) | Bracket order signing regression |
+| 15 | `compile_trading_service_test.bat` | CLOID roundtrip, nonce monotonicity, TradeMap CRUD, fill status | Service-layer refactor coverage |
+| 16 | `compile_account_service_test.bat` | Balance parsing, position parsing, HTTP fallback | Service-layer refactor coverage |
+| 17 | `compile_market_service_test.bat` | Candle interval mapping, asset metadata, funding rate | Service-layer refactor coverage |
+| 18 | `compile_market_service_http_test.bat` | Market service HTTP response parsing | Service-layer refactor coverage |
+| 19 | `compile_account_service_http_test.bat` | Account service HTTP response parsing | Service-layer refactor coverage |
+| 20 | `compile_account_service_ws_test.bat` | Account service WS cache interactions | Service-layer refactor coverage |
+| 21 | `compile_market_service_ws_test.bat` | Market service WS cache interactions | Service-layer refactor coverage |
 
 ### Test-to-File Mapping
 
@@ -148,7 +148,7 @@ hl::mock::g_httpMock.shouldFail = false;
 //=============================================================================
 // test_my_feature.cpp - Description of what this test validates
 //=============================================================================
-// PREVENTS BUGS: OPM-XXX (brief description)
+// PREVENTS BUGS: <brief description>
 //=============================================================================
 
 // Include mock Zorro (only needed if test uses HTTP or nap)

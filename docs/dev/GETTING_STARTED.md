@@ -77,8 +77,17 @@ Key flags:
 
 ### Incremental Build
 
+From any PowerShell window (no Developer Prompt required):
+
 ```powershell
-powershell.exe -Command "& 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe' --build 'c:\Users\admki\OneDrive\Zorro-plugin\build_vcpkg' --config Release"
+$cmake = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
+& $cmake --build "<repo-root>\build_vcpkg" --config Release
+```
+
+Or, more simply, from a Developer Command Prompt with `cmake` already on PATH:
+
+```batch
+cmake --build build_vcpkg --config Release
 ```
 
 Output: `build_vcpkg/Release/Hyperliquid_Dev.dll` (~2.6 MB)

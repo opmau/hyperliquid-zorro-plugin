@@ -191,7 +191,7 @@ Each stage has specific requirements:
 ### Common Pitfalls
 
 - **MsgPack key order matters.** Hyperliquid hashes the msgpack bytes. Different key ordering = different hash = rejected signature.
-- **The `source` field** is not the network name. It's a single character: `"a"` or `"b"`. This was a real bug (OPM-22).
+- **The `source` field** is not the network name. It's a single character: `"a"` or `"b"`. This was a real bug.
 - **Nonce must be monotonically increasing.** The plugin uses a timestamp-based nonce with atomic increment.
 - **Trigger orders** use a different msgpack encoding (`packTriggerOrderAction`) with additional fields (`tpsl`, `triggerPx`, `isMarket`).
 
