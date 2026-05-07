@@ -144,3 +144,9 @@ tests/generate_triage_report.py
 # Local working notes (not tracked)
 docs/REFACTOR_CHECKLIST_v2.md
 docs/archive/
+
+# Maintainer working notes at repo root (investigation logs, parallel-run CSVs, etc.)
+/opm-*-investigation.md
+/parallel_run*.csv
+/yolo_*.log
+/REVIEW.md

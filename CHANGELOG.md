@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **WS thread stalls causing price-cache staleness** [OPM-550]: `BrokerMessage` (a synchronous `SendMessage` to the Zorro GUI thread) was called directly from the IXWebSocket internal thread. When the GUI was busy, the WS thread blocked for hundreds of milliseconds, starving message dispatch and causing l2Book updates to appear stale by up to 2.5 minutes. Fixed by introducing an async bounded log queue: WS threads enqueue messages non-blocking; the main thread drains the queue on each `BrokerTime`/`BrokerCommand` call.
+- **WS thread stalls causing price-cache staleness**: `BrokerMessage` (a synchronous `SendMessage` to the Zorro GUI thread) was called directly from the IXWebSocket internal thread. When the GUI was busy, the WS thread blocked for hundreds of milliseconds, starving message dispatch and causing l2Book updates to appear stale by up to 2.5 minutes. Fixed by introducing an async bounded log queue: WS threads enqueue messages non-blocking; the main thread drains the queue on each `BrokerTime`/`BrokerCommand` call.
   - Added `Logger` class (`hl_globals.h/cpp`) with producer/consumer split: `log()`/`logf()`/`enqueue()` for WS threads, `drain()` for main thread only.
   - Added bounded `Connection::poll()` dispatch (max 256 messages or 50 ms wall-clock) to prevent a burst flood from starving IXWebSocket's own receive loop.
   - Split WS log callback (`enqueueLogAsync`) from main-thread log callback (`sinkToBrokerMessage`) to prevent accidental cross-thread `BrokerMessage` calls.
@@ -39,23 +39,23 @@ First production release of the refactored plugin.
 
 ### WebSocket
 
-- Migrated from WinHTTP to IXWebSocket backend with native auto-reconnect [OPM-127, OPM-128]
-- PerpDex `clearinghouseState` subscriptions, lazy-activated per strategy [OPM-218, OPM-219, OPM-439]
+- Migrated from WinHTTP to IXWebSocket backend with native auto-reconnect
+- PerpDex `clearinghouseState` subscriptions, lazy-activated per strategy
 - L2 book subscriptions with 60-second health-check fallback to HTTP
 
 ### Trading
 
 - NFA-compliant order flow (Hedge=0 semantics, no stop-and-reverse)
 - Bracket orders via separate stop-loss placement (`SET_ORDERTYPE +8`)
-- `BrokerTrade` uses WS `PriceCache` for open orders [OPM-237]
+- `BrokerTrade` uses WS `PriceCache` for open orders
 
 ### Fixed
 
-- PerpDex position lookup: extract `dex` directly from WS `data` object and resolve `@index` coin format via index mapping [OPM-226]
-- `BrokerCommand` trace log and HTTP-fallback `getPrice` notices raised to `diagLevel>=3`/`>=2` (were flooding logs at `diagLevel=1`) [OPM-438]
+- PerpDex position lookup: extract `dex` directly from WS `data` object and resolve `@index` coin format via index mapping
+- `BrokerCommand` trace log and HTTP-fallback `getPrice` notices raised to `diagLevel>=3`/`>=2` (were flooding logs at `diagLevel=1`)
 - `BrokerAsset` now sets `priceSymbol` for `GET_PRICE` contract
-- Flat positions are detected before issuing close orders to prevent Error 075 [OPM-227]
-- `HL_GET_OPEN_ORDERS` queries WS `PriceCache` directly [OPM-237]
+- Flat positions are detected before issuing close orders to prevent Error 075
+- `HL_GET_OPEN_ORDERS` queries WS `PriceCache` directly
 
 ### Testing
 

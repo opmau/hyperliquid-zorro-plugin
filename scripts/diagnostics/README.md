@@ -11,7 +11,7 @@ a configurable set of coins, on a single connection, and records every incoming
 message with a high-resolution local arrival timestamp.
 
 Used to ground-truth plugin claims about WS push cadence — e.g. when the plugin's
-`getPrice` cache age routinely exceeds 1500 ms (OPM-472), this script tells us
+`getPrice` cache age routinely exceeds 1500 ms, this script tells us
 whether the gap is on HL's side / network side, or inside the plugin's WS path
 (IXWebSocket queue, parser, connection thread).
 
@@ -60,7 +60,7 @@ Press Ctrl-C any time to stop early — the summary prints on shutdown.
 
 ### Recommended methodology
 
-For OPM-472 root-cause confirmation:
+For WS-cadence root-cause confirmation:
 
 1. **Baseline run alone** (~30 min, mainnet, during the same time of day as the
    real YOLO session). Establishes the ground truth for what HL delivers from

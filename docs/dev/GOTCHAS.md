@@ -133,14 +133,14 @@ Both dev and production DLLs can coexist in Zorro's plugin directory.
 
 ### Paths Have Spaces
 
-The project lives in OneDrive. Always quote paths in shell commands:
+If your checkout lives in a path containing spaces (OneDrive, `Program Files`, etc.), always quote paths in shell commands:
 
 ```powershell
 # Correct
-cmake --build "c:\Users\admki\OneDrive\Zorro-plugin\build_vcpkg" --config Release
+cmake --build "$env:USERPROFILE\OneDrive\Zorro-plugin\build_vcpkg" --config Release
 
-# Wrong -- will fail
-cmake --build c:\Users\admki\OneDrive\Zorro-plugin\build_vcpkg --config Release
+# Wrong -- will fail with an unquoted path containing spaces
+cmake --build $env:USERPROFILE\OneDrive\Zorro-plugin\build_vcpkg --config Release
 ```
 
 ---
@@ -171,7 +171,7 @@ IXWebSocket handles reconnection natively with exponential backoff (1s to 30s). 
 
 ---
 
-## Fatal Error Handling (OPM-170)
+## Fatal Error Handling
 
 ### Global Fatal Error Flag
 
@@ -189,13 +189,13 @@ If a coin's l2Book subscription causes repeated reconnects with no data received
 
 **Symptom:** Strategy halts with "FATAL: WebSocket entered unrecoverable state".
 
-### PerpDex Name Separator (OPM-169)
+### PerpDex Name Separator
 
 PerpDex assets use **underscore** (`_`) as the separator between the base symbol and dex name:
 - `GOLD-USDC_xyz` (Zorro display name) -> `xyz:GOLD` (API format)
 
 Previously used dot (`.`), which caused conflicts with Zorro's history file paths (Zorro interprets dots in filenames as file extension separators).
 
-### HTTP Fallback for Positions (OPM-134)
+### HTTP Fallback for Positions
 
 `account::ensurePositionData()` adds an HTTP fallback when WebSocket `clearinghouseState` hasn't delivered position data. This prevents `getPosition()` and `getAllPositions()` from returning empty results during WS warmup or after reconnection.

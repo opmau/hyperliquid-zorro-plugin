@@ -72,10 +72,10 @@ The plugin is a Windows 32-bit DLL that implements the Zorro broker plugin inter
 | `hl_meta_spot.cpp` | Spot asset metadata (extension of `hl_meta`) |
 | `hl_market_service.h` / `.cpp` | Price resolution (WS cache -> HTTP fallback), candle history, asset lookups |
 | `hl_trading_service.h` / `.cpp` | Order placement pipeline: build request -> EIP-712 encode -> sign -> submit -> track |
-| `hl_trading_cancel.cpp` | Order cancellation + dead man's switch (scheduleCancel) [OPM-83] |
-| `hl_trading_twap.h` / `.cpp` | TWAP order placement and cancellation [OPM-81] |
-| `hl_trading_modify.h` / `.cpp` | Atomic order modification via batchModify [OPM-80] |
-| `hl_trading_bracket.h` / `.cpp` | Bracket orders: entry + TP + SL with normalTpsl grouping [OPM-79] |
+| `hl_trading_cancel.cpp` | Order cancellation + dead man's switch (scheduleCancel) |
+| `hl_trading_twap.h` / `.cpp` | TWAP order placement and cancellation |
+| `hl_trading_modify.h` / `.cpp` | Atomic order modification via batchModify |
+| `hl_trading_bracket.h` / `.cpp` | Bracket orders: entry + TP + SL with normalTpsl grouping |
 | `hl_account_service.h` / `.cpp` | Balance, positions, margin queries. WS cache with HTTP fallback. Immediate fill application |
 
 ### API (`src/api/`)
@@ -230,7 +230,7 @@ DLLFUNC double BrokerCommand(int Command, intptr_t Parameter);
 
 | Command | Code | Returns | Notes |
 |---------|------|---------|-------|
-| `GET_COMPLIANCE` | 19 | `0` | Returns 0; NFA mode controlled by Accounts.csv [OPM-213] |
+| `GET_COMPLIANCE` | 19 | `0` | Returns 0; NFA mode controlled by Accounts.csv |
 | `GET_MAXREQUESTS` | 16 | `5` | Max concurrent HTTP requests |
 | `GET_MAXTICKS` | 108 | `5000` | Hyperliquid candleSnapshot limit |
 | `GET_BROKERZONE` | 700 | `0` | UTC (no timezone offset) |
@@ -249,21 +249,21 @@ DLLFUNC double BrokerCommand(int Command, intptr_t Parameter);
 
 | Command | Code | Parameter | Returns | Notes |
 |---------|------|-----------|---------|-------|
-| `HL_EXPORT_ASSETS` | 50001 | file path string | 1 on success | Writes CSV for BTC/ETH/SOL [OPM-13] |
-| `HL_EXPORT_META` | 50002 | file path string | asset count | Writes CSV for all assets [OPM-13] |
-| `HL_EXPORT_ACCOUNT` | 50003 | file path string | 1 on success | Writes Accounts.csv row [OPM-13] |
+| `HL_EXPORT_ASSETS` | 50001 | file path string | 1 on success | Writes CSV for BTC/ETH/SOL |
+| `HL_EXPORT_META` | 50002 | file path string | asset count | Writes CSV for all assets |
+| `HL_EXPORT_ACCOUNT` | 50003 | file path string | 1 on success | Writes Accounts.csv row |
 | `HL_VALIDATE_PRICES` | 50010 | 0 | 1/0 | Health check: fetches BTC/ETH/SOL prices via HTTP |
 | `HL_ENABLE_WEBSOCKET` | 50011 | 0/1 | 1 | Enable/disable WebSocket at runtime |
 | `HL_SET_ORDER_TYPE` | 50012 | "Ioc"/"Gtc"/"Alo" | 1 on success | Set order type directly |
 | `HL_GET_OPEN_ORDERS` | 50020 | symbol or 0 | count | Returns count of open orders |
 | `HL_SET_ACCOUNT_MODE` | 50021 | 0/1 | 1 on success | 0=API wallet, 1=vault |
-| `HL_FORCE_WS_DISCONNECT` | 50030 | 0 | 1 on success | Debug: force WS disconnect [OPM-170] |
-| `HL_GET_FUNDING_RATE` | 50031 | coin string or 0 | hourly rate (double) | Current funding rate [OPM-172] |
-| `HL_SCHEDULE_CANCEL` | 50032 | seconds (0=clear) | 1/0 | Dead man's switch [OPM-83] |
-| `HL_PLACE_TWAP` | 50040 | `TwapRequest*` | twapId (double) | Place TWAP order [OPM-81] |
-| `HL_CANCEL_TWAP` | 50041 | twapId (uint64) | 1/0 | Cancel active TWAP [OPM-81] |
-| `HL_MODIFY_ORDER` | 50042 | `ModifyRequest*` | 1/0 | Atomic order modify [OPM-80] |
-| `HL_PLACE_BRACKET` | 50043 | `BracketRequest*` | entryTradeId | Bracket order (entry+TP+SL) [OPM-79] |
+| `HL_FORCE_WS_DISCONNECT` | 50030 | 0 | 1 on success | Debug: force WS disconnect |
+| `HL_GET_FUNDING_RATE` | 50031 | coin string or 0 | hourly rate (double) | Current funding rate |
+| `HL_SCHEDULE_CANCEL` | 50032 | seconds (0=clear) | 1/0 | Dead man's switch |
+| `HL_PLACE_TWAP` | 50040 | `TwapRequest*` | twapId (double) | Place TWAP order |
+| `HL_CANCEL_TWAP` | 50041 | twapId (uint64) | 1/0 | Cancel active TWAP |
+| `HL_MODIFY_ORDER` | 50042 | `ModifyRequest*` | 1/0 | Atomic order modify |
+| `HL_PLACE_BRACKET` | 50043 | `BracketRequest*` | entryTradeId | Bracket order (entry+TP+SL) |
 
 ---
 
