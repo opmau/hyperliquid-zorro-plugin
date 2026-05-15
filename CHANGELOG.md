@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.2] — 2026-05-13
+
+### Fixed
+
+- **GET_POSITION doubles positions on main-dex assets with perpDex namesakes** ([OPM-600]):
+  The OPM-226 fallback in `GET_POSITION` rewrote bare coin lookups to perpDex-prefixed
+  keys (e.g. `cash:BTC`, `hyna:SOL`) whenever a matching perpDex asset existed in the
+  registry, even when the actual position was on main-dex. Hyperliquid's `cash`/`hyna`
+  universes share coin names with main-dex assets, so the rewrite caused cache misses.
+  Strategies treated existing positions as flat and doubled up on entry. Fix: prefer
+  main-dex (non-perpDex) assets in the fallback; only apply the perpDex rewrite when no
+  main-dex asset with that coin exists.
+
+- **Removed stale OPM-219 fallbacks from `getPosition`** ([OPM-555]):
+  Defensive prefix-stripping fallbacks introduced during OPM-219 had outlived their
+  usefulness. Cache keys are now normalized at write time; an exact-key lookup is the
+  only correct behavior. The old fallbacks silently returned wrong-dex positions when an
+  asset existed on one dex but not the other.
+
+### Added
+
+- **`hl_protocol.h`** ([OPM-446]): Centralized Hyperliquid wire-format string constants
+  for WS channel names, subscription types, HTTP `/info` request types, and POST action
+  types. Migrates `ws_manager.cpp` dispatch to use the new constants.
+
+### Changed
+
+- Sanitized repository for public release: removed internal doc templates ([OPM-556]).
+- Added upstream API doc links to protocol-touching headers ([OPM-453]).
+
 ## [2.0.1] — 2026-05-05
 
 ### Fixed
