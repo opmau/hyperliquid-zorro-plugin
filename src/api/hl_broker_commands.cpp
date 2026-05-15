@@ -263,13 +263,29 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         // [OPM-226] If parsePerpDex didn't find a perpDex suffix (bare name like "XYZ100"),
         // resolve it from g_assets. Strategies pass the Zorro Name column (e.g. "XYZ100"),
         // not the full Symbol (e.g. "XYZ100-USDC_xyz"), so the dex suffix is missing.
+        //
+        // [OPM-600] Only apply the perpDex rewrite when NO main-dex (or spot) asset
+        // with this coin exists. Hyperliquid cash/hyna universes contain coins that
+        // also exist on main-dex (BTC, ETH, SOL, ADA, ...). Unconditional rewriting
+        // caused cache lookups to miss main-dex positions, leading strategies to
+        // double up on existing positions.
         if (!perpDex[0]) {
+            bool hasNonPerpDexMatch = false;
             for (int i = 0; i < hl::g_assets.count; ++i) {
                 const hl::AssetInfo* a = hl::g_assets.getByIndex(i);
-                if (a && a->isPerpDex && a->perpDex[0]
-                    && _stricmp(a->coin, coin) == 0) {
-                    strncpy_s(perpDex, a->perpDex, _TRUNCATE);
+                if (a && !a->isPerpDex && _stricmp(a->coin, coin) == 0) {
+                    hasNonPerpDexMatch = true;
                     break;
+                }
+            }
+            if (!hasNonPerpDexMatch) {
+                for (int i = 0; i < hl::g_assets.count; ++i) {
+                    const hl::AssetInfo* a = hl::g_assets.getByIndex(i);
+                    if (a && a->isPerpDex && a->perpDex[0]
+                        && _stricmp(a->coin, coin) == 0) {
+                        strncpy_s(perpDex, a->perpDex, _TRUNCATE);
+                        break;
+                    }
                 }
             }
         }
