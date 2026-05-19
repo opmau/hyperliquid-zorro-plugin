@@ -105,9 +105,13 @@ void test_numeric_helpers() {
     assert(approxEqual(roundToTickSize(103.0, 5.0), 105.0));
     printf("    roundToTickSize OK\n");
 
-    // formatSize
+    // formatSize — must strip trailing zeros to match HL's canonical form
+    // (Python SDK float_to_wire). See OPM-677.
     assert(formatSize(0.00123, 5) == "0.00123");
-    assert(formatSize(1.5, 2) == "1.50");
+    assert(formatSize(1.5, 2) == "1.5");          // was "1.50" — trailing zero stripped
+    assert(formatSize(0.0973, 5) == "0.0973");    // BTC repro: was "0.09730"
+    assert(formatSize(2.0, 4) == "2");            // integer-valued size loses ".0000"
+    assert(formatSize(0.1, 3) == "0.1");          // trailing zeros only
     printf("    formatSize OK\n");
 
     // formatPrice
