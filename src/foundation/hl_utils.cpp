@@ -213,7 +213,22 @@ std::string formatSize(double size, int szDecimals) {
 
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(szDecimals) << size;
-    return oss.str();
+    std::string s = oss.str();
+
+    // [OPM-677] Strip trailing zeros to match Hyperliquid's canonical form
+    // (Python SDK's float_to_wire uses Decimal.normalize()). Without this,
+    // sizes like 0.09730 hash differently on HL's side than locally, causing
+    // signature verification to recover a phantom address and the order to
+    // be rejected with "User or API Wallet does not exist".
+    size_t dot = s.find('.');
+    if (dot != std::string::npos) {
+        size_t end = s.find_last_not_of('0');
+        if (end != std::string::npos)
+            s = s.substr(0, end + 1);
+        if (!s.empty() && s.back() == '.')
+            s.pop_back();
+    }
+    return s;
 }
 
 std::string formatPrice(double price, int pxDecimals) {
