@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.3] — 2026-05-20
+
+### Fixed
+
+- **Order rejected with "User or API Wallet does not exist" on assets with trailing-zero sizes** ([OPM-677]):
+  `formatSize()` formatted sizes with fixed-precision but did not strip trailing zeros
+  (e.g. `0.09730`, `13.930`). Hyperliquid's server-side signature verification hashes
+  the action from its canonical msgpack form, which strips trailing zeros (matching the
+  Python SDK's `float_to_wire` / `Decimal.normalize()`). The hash mismatch caused ECDSA
+  recovery to yield a phantom signer address — different per retry — so HL rejected the
+  order. `formatPrice` already stripped trailing zeros; this aligns `formatSize` to the
+  same behaviour. Observed on BTC (2026-05-19) and BNB (2026-05-20) in live rebalances.
+
+- **`queryOrderByCloid` returned empty `oid`, blocking PENDING-order reconciliation** ([OPM-679]):
+  The HL `orderStatus` response nests order fields one level deeper than the status field:
+  `root.order = {"order":{...,"oid":...},"status":"open","statusTimestamp":...}`. The
+  code read `oid` from `root.order` (where status lives) instead of `root.order.order`
+  (where `oid` lives). The empty `oid` gated the entire PENDING-order resolution path in
+  `BrokerTrade` (`if (qr.oid[0])`), leaving PENDING orders permanently stuck. The unit
+  test fixtures encoded the same wrong (flattened) structure as the bug, so the test
+  passed while production silently failed. Fixtures corrected to the real nested shape.
+
 ## [2.0.2] — 2026-05-13
 
 ### Fixed
