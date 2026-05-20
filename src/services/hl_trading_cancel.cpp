@@ -194,8 +194,16 @@ CloidQueryResult queryOrderByCloid(const char* cloid) {
 
         result.outcome = QueryOutcome::Found;
 
-        if (orderObj) {
-            yyjson_val* oidVal = yyjson_obj_get(orderObj, "oid");
+        // [OPM-679] The orderStatus response nests the order fields one level
+        // deeper than the status: root.order = {"order":{...,"oid":...},
+        // "status":"open","statusTimestamp":...}. Read oid/sz from the inner
+        // "order" object; status was correctly read from the outer object
+        // above. Falling back to orderObj keeps this robust if HL ever flattens.
+        yyjson_val* orderNode = json::getObject(orderObj, "order");
+        if (!orderNode) orderNode = orderObj;
+
+        if (orderNode) {
+            yyjson_val* oidVal = yyjson_obj_get(orderNode, "oid");
             if (oidVal) {
                 if (yyjson_is_int(oidVal))
                     sprintf_s(result.oid, "%lld", (long long)yyjson_get_sint(oidVal));
@@ -207,7 +215,6 @@ CloidQueryResult queryOrderByCloid(const char* cloid) {
         }
 
         if (strcmp(orderStatus, "filled") == 0) {
-            yyjson_val* orderNode = orderObj ? orderObj : root;
             result.filledSize = json::getDouble(orderNode, "sz");
             result.avgPrice = json::getDouble(orderNode, "avgPx");
         }
