@@ -55,7 +55,10 @@ jobs:
       - name: Set up vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: '2024.11.16'
+          # Must be a full 40-char commit SHA, not a release tag — run-vcpkg
+          # rejects tags ("commit id must be a full SHA1 hash"). This SHA is the
+          # 2024.11.16 release tag (git ls-remote refs/tags/2024.11.16).
+          vcpkgGitCommitId: 'b2cb0da531c2f1f740045bfe7c4dac59f0b2b69c'
           runVcpkgInstall: false
 
       - name: Configure CMake (production, Win32, DEV_BUILD=OFF)
