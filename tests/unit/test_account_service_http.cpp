@@ -100,13 +100,15 @@ struct CloidQueryResult {
 };
 
 /// Parse orderStatus response into three-state result.
-/// Possible responses:
+/// Real HL structure nests the order fields under order.order; status and
+/// statusTimestamp sit at the outer order level (verified: Python SDK cassette
+/// info_test/test_historical_orders.yaml + OPM-679 production log):
 ///   {"status":"unknownOid"} → NotFound
-///   {"order":{"oid":12345,"status":"filled","sz":"0.001","avgPx":"60000",...}} → Found
-///   {"order":{"status":"rejected"}} → NotFound
-///   {"order":{"status":"open","oid":12345}} → Found
-///   {"order":{"status":"canceled","oid":12345}} → Found
-///   {"order":{"status":"marginCanceled"}} → NotFound
+///   {"status":"order","order":{"order":{"oid":12345,"sz":"0.001","avgPx":"60000",...},"status":"filled","statusTimestamp":...}} → Found
+///   {"status":"order","order":{"order":{"oid":12345,...},"status":"open",...}} → Found
+///   {"status":"order","order":{"order":{"oid":12345,...},"status":"canceled",...}} → Found
+///   {"status":"order","order":{"status":"rejected",...}} → NotFound
+///   {"status":"order","order":{"status":"marginCanceled",...}} → NotFound
 CloidQueryResult parseOrderStatus(const char* json, size_t len) {
     CloidQueryResult result;
     if (!json || len == 0) {
@@ -156,9 +158,15 @@ CloidQueryResult parseOrderStatus(const char* json, size_t len) {
 
         result.outcome = QueryOutcome::Found;
 
+        // [OPM-679] orderStatus nests the order fields one level deeper than
+        // status: root.order = {"order":{...,"oid":...},"status":"open",...}.
+        // Read oid/sz from the inner "order"; fall back to orderObj for safety.
+        yyjson_val* orderNode = hl::json::getObject(orderObj, "order");
+        if (!orderNode) orderNode = orderObj;
+
         // Extract oid (can be int, real, or string)
-        if (orderObj) {
-            yyjson_val* oidVal = yyjson_obj_get(orderObj, "oid");
+        if (orderNode) {
+            yyjson_val* oidVal = yyjson_obj_get(orderNode, "oid");
             if (oidVal) {
                 if (yyjson_is_int(oidVal))
                     sprintf_s(result.oid, "%lld", (long long)yyjson_get_sint(oidVal));
@@ -171,7 +179,6 @@ CloidQueryResult parseOrderStatus(const char* json, size_t len) {
 
         // Extract fill data for "filled" orders
         if (strcmp(orderStatus, "filled") == 0) {
-            yyjson_val* orderNode = orderObj ? orderObj : root;
             result.filledSize = hl::json::getDouble(orderNode, "sz");
             result.avgPrice = hl::json::getDouble(orderNode, "avgPx");
         }
@@ -316,14 +323,21 @@ TEST_CASE(order_status_unknown_oid) {
     ASSERT_STREQ(r.status, "unknownOid");
 }
 
+// [OPM-679] Fixtures use the REAL HL orderStatus nesting (order.order.oid with
+// status/statusTimestamp at the outer order level). The previous fixtures had
+// oid flattened into the outer order object, which hid the production bug where
+// queryOrderByCloid read oid from the wrong level and returned an empty oid.
 TEST_CASE(order_status_filled_with_data) {
     const char* json = R"({
         "status":"order",
         "order":{
-            "oid":12345678,
+            "order":{
+                "oid":12345678,
+                "sz":"0.001",
+                "avgPx":"60000.50"
+            },
             "status":"filled",
-            "sz":"0.001",
-            "avgPx":"60000.50"
+            "statusTimestamp":1755863118217
         }
     })";
     auto r = AcctHttp::parseOrderStatus(json, strlen(json));
@@ -338,8 +352,11 @@ TEST_CASE(order_status_open) {
     const char* json = R"({
         "status":"order",
         "order":{
-            "oid":99999,
-            "status":"open"
+            "order":{
+                "oid":99999
+            },
+            "status":"open",
+            "statusTimestamp":1755863118217
         }
     })";
     auto r = AcctHttp::parseOrderStatus(json, strlen(json));
@@ -355,8 +372,11 @@ TEST_CASE(order_status_canceled) {
     const char* json = R"({
         "status":"order",
         "order":{
-            "oid":55555,
-            "status":"canceled"
+            "order":{
+                "oid":55555
+            },
+            "status":"canceled",
+            "statusTimestamp":1755863118217
         }
     })";
     auto r = AcctHttp::parseOrderStatus(json, strlen(json));
@@ -369,13 +389,17 @@ TEST_CASE(order_status_triggered) {
     const char* json = R"({
         "status":"order",
         "order":{
-            "oid":77777,
-            "status":"triggered"
+            "order":{
+                "oid":77777
+            },
+            "status":"triggered",
+            "statusTimestamp":1755863118217
         }
     })";
     auto r = AcctHttp::parseOrderStatus(json, strlen(json));
     ASSERT_EQ((int)r.outcome, (int)AcctHttp::QueryOutcome::Found);
     ASSERT_STREQ(r.status, "triggered");
+    ASSERT_STREQ(r.oid, "77777");
 }
 
 TEST_CASE(order_status_rejected) {
@@ -425,7 +449,8 @@ TEST_CASE(order_status_no_status_field) {
 
 TEST_CASE(order_status_string_oid) {
     const char* json = R"({
-        "order":{"oid":"abc123","status":"open"}
+        "status":"order",
+        "order":{"order":{"oid":"abc123"},"status":"open","statusTimestamp":1755863118217}
     })";
     auto r = AcctHttp::parseOrderStatus(json, strlen(json));
     ASSERT_EQ((int)r.outcome, (int)AcctHttp::QueryOutcome::Found);
@@ -435,7 +460,8 @@ TEST_CASE(order_status_string_oid) {
 TEST_CASE(order_status_real_oid) {
     // Some APIs return oid as floating point
     const char* json = R"({
-        "order":{"oid":12345678.0,"status":"open"}
+        "status":"order",
+        "order":{"order":{"oid":12345678.0},"status":"open","statusTimestamp":1755863118217}
     })";
     auto r = AcctHttp::parseOrderStatus(json, strlen(json));
     ASSERT_EQ((int)r.outcome, (int)AcctHttp::QueryOutcome::Found);
@@ -445,15 +471,20 @@ TEST_CASE(order_status_real_oid) {
 TEST_CASE(order_status_filled_partial) {
     // Partially filled order still returns "filled" status
     const char* json = R"({
+        "status":"order",
         "order":{
-            "oid":11111,
+            "order":{
+                "oid":11111,
+                "sz":"0.005",
+                "avgPx":"91234.56"
+            },
             "status":"filled",
-            "sz":"0.005",
-            "avgPx":"91234.56"
+            "statusTimestamp":1755863118217
         }
     })";
     auto r = AcctHttp::parseOrderStatus(json, strlen(json));
     ASSERT_EQ((int)r.outcome, (int)AcctHttp::QueryOutcome::Found);
+    ASSERT_STREQ(r.oid, "11111");
     ASSERT_FLOAT_EQ_TOL(r.filledSize, 0.005, 1e-6);
     ASSERT_FLOAT_EQ_TOL(r.avgPrice, 91234.56, 0.01);
 }
