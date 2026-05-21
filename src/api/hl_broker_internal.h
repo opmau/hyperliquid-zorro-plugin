@@ -70,6 +70,11 @@
   #define PLUGIN_VERSION "2.0.0-Modular"
 #endif
 
+// Compile-time build stamp — changes on every recompile, so the BrokerLogin
+// log line unambiguously identifies which DLL build is loaded. Use this to
+// detect a stale/wrong DLL at runtime (a hardcoded version string can't).
+#define PLUGIN_BUILD (__DATE__ " " __TIME__)
+
 #define DLLFUNC extern "C" __declspec(dllexport)
 
 // Custom command codes
