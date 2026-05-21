@@ -404,8 +404,8 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
 
         if (accounts) accounts[0] = '\0';
 
-        char verMsg[64];
-        sprintf_s(verMsg, "%s %s", PLUGIN_NAME, PLUGIN_VERSION);
+        char verMsg[128];
+        sprintf_s(verMsg, "%s %s (build %s)", PLUGIN_NAME, PLUGIN_VERSION, PLUGIN_BUILD);
         hl::g_logger.log(1, verMsg);
 
         return 1;
