@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.4] — 2026-05-21
+
+### Added
+
+- **Compile-time build stamp logged at `BrokerLogin`**: the version line now includes
+  `__DATE__ __TIME__`, e.g. `Hyperliquid 2.0.0-Modular (build May 21 2026 22:45:41)`.
+  The hardcoded `PLUGIN_VERSION` string can't reveal which DLL build is actually loaded;
+  the build stamp changes on every recompile, so a stale or wrong DLL is obvious at
+  runtime. Added after a stale DLL on a OneDrive-synced VPS silently ran pre-fix code.
+
+### Fixed
+
+- **CI release workflow failed at vcpkg setup** (`ci`): `lukka/run-vcpkg@v11` requires a
+  full 40-char commit SHA for `vcpkgGitCommitId`, but the workflow passed the release tag
+  `2024.11.16`. This failed every tagged release (v2.0.1–v2.0.3) before the build started,
+  forcing manual publishing. Pinned to the tag's commit SHA `b2cb0da`.
+
 ## [2.0.3] — 2026-05-20
 
 ### Fixed
