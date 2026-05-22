@@ -18,6 +18,14 @@ jobs:
   build-and-release:
     runs-on: windows-latest
 
+    # Disable vcpkg binary caching. vcpkg auto-selects the GitHub Actions
+    # ("x-gha") binary source on Actions runners, which requires
+    # ACTIONS_RUNTIME_TOKEN + ACTIONS_CACHE_URL — not exported into this job,
+    # so CMake configure aborted ("GHA binary source requires ..."). Clearing
+    # the binary sources builds the single dependency (IXWebSocket) from source.
+    env:
+      VCPKG_BINARY_SOURCES: clear
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
