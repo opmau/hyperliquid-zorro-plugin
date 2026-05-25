@@ -144,6 +144,32 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
         }
     }
 
+    // [OPM-680] Same-side EXTEND snapshot.
+    // If this BrokerBuy2 will add a new tradeID alongside an existing IMPORTED_
+    // trade on the same asset+side, we must snapshot the IMPORTED_'s share to
+    // the current live position size BEFORE applyFill inflates the cache.
+    // Otherwise BrokerTrade's multi-tracker branch would read a stale share
+    // (the one set at GET_TRADES time, possibly missing intervening external
+    // changes). See BrokerTrade IMPORTED_ branch and tests/test_imported_trades.
+    // Skipped for close orders (opposite direction) and trigger orders (not
+    // filled yet) — neither establishes multi-tracker mode.
+    if (!isCloseOrder && !isTriggerOrder && hl::g_trading.tradeCsInit) {
+        double currentLive = fabs(hl::account::getPosition(coinForApi.c_str()).size);
+        EnterCriticalSection(&hl::g_trading.tradeCs);
+        for (auto it = hl::g_trading.tradeMap.begin();
+             it != hl::g_trading.tradeMap.end(); ++it) {
+            hl::OrderState& other = it->second;
+            if (strncmp(other.orderId, "IMPORTED_", 9) != 0) continue;
+            if (other.side != request.side) continue;
+            if (strcmp(other.coin, coinForApi.c_str()) != 0) continue;
+            if (other.filledSize != currentLive) {
+                other.filledSize = currentLive;  // snapshot share at extend boundary
+            }
+            break;  // at most one IMPORTED_ per asset+side
+        }
+        LeaveCriticalSection(&hl::g_trading.tradeCs);
+    }
+
     // Place order via trading service with explicit trade ID
     hl::OrderResult result = hl::trading::placeOrderWithId(request, tradeId);
 
@@ -319,6 +345,18 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
         hl::account::applyFill(state.coin, closeFillSize, closeFillPx, closingBuy);
     }
 
+    // [OPM-680] If the trade being closed is IMPORTED_, decrement its remaining
+    // share. BrokerTrade's IMPORTED_ branch reports state.filledSize as the
+    // trade's share of the broker position; keeping that in sync requires us
+    // to subtract Zorro-driven closes here. Without this, a partial Cover on
+    // an IMPORTED_ trade leaves Zorro polling the stale pre-close size.
+    if (strncmp(state.orderId, "IMPORTED_", 9) == 0 && closeFillSize > 0) {
+        double newShare = state.filledSize - closeFillSize;
+        if (newShare < 0) newShare = 0;
+        state.filledSize = newShare;
+        hl::trading::storeOrder(tradeId, state);
+    }
+
     return tradeId;
 }
 
@@ -408,9 +446,32 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
         return fillLots;
     }
 
-    // --- IMPORTED_ live position lookup [OPM-90] ---
-    // Positions synced via GET_TRADES. Must query CURRENT position from WS
-    // cache — position may have changed due to fills from other orders.
+    // --- IMPORTED_ share-of-position reporting [OPM-90, OPM-680] ---
+    // Positions synced via GET_TRADES need to map a single broker aggregate
+    // position onto Zorro's per-tradeID fill model. Two regimes:
+    //
+    //   1. SOLE TRACKER — this IMPORTED_ is the only Zorro tradeID on the
+    //      asset+side. The broker aggregate IS this trade's share. We report
+    //      fabs(livePos.size) and keep state.filledSize synced to it. This
+    //      preserves the OPM-90/18c287c behavior: external partial closes
+    //      (manual operator, partial liquidation) are auto-detected because
+    //      the live aggregate shrinks.
+    //
+    //   2. MULTI TRACKER — another Zorro tradeID exists on the same asset+side
+    //      (e.g., BrokerBuy2 extended the position). Reporting the live
+    //      aggregate would double-count, because the other tradeID is also
+    //      tracking its own fill. We report state.filledSize (this trade's
+    //      share), kept accurate by:
+    //        - BrokerBuy2's pre-extend snapshot (captures the IMPORTED_'s
+    //          share at the moment a new same-side tradeID is created)
+    //        - BrokerSell2's decrement hook (subtracts Zorro-driven closes)
+    //
+    // Close/reverse detection always uses the live position: if the broker
+    // reports zero or opposite direction, this trade is done regardless of
+    // state.filledSize. External partial closes after entering multi-tracker
+    // mode are NOT auto-detected — that ambiguity cannot be resolved at the
+    // plugin level (we don't know which tradeID's share to debit). Strategies
+    // that need this should reconcile at the strategy layer.
     if (strncmp(state.orderId, "IMPORTED_", 9) == 0) {
         hl::account::PositionInfo livePos = hl::account::getPosition(state.coin);
         bool importWasLong = (state.side == hl::OrderSide::Buy);
@@ -428,12 +489,49 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
             return 0;  // Trade closed/reversed
         }
 
-        // Position still exists in same direction — return CURRENT size
-        double actualSize = fabs(livePos.size);
-        double entryPx = livePos.entryPrice > 0 ? livePos.entryPrice : state.avgPrice;
+        // Detect multi-tracker regime: is any OTHER Zorro-visible same-side
+        // tradeID present for this asset? Skip RESUMED_ (internal accounting
+        // from GET_POSITION rebuilds; not in Zorro's trade list), other
+        // IMPORTED_ (one per asset/side by construction — guard anyway),
+        // cancelled, and zero-fill entries.
+        bool multiTracker = false;
+        if (hl::g_trading.tradeCsInit) {
+            EnterCriticalSection(&hl::g_trading.tradeCs);
+            for (auto it = hl::g_trading.tradeMap.begin();
+                 it != hl::g_trading.tradeMap.end(); ++it) {
+                if (it->first == tradeId) continue;
+                const hl::OrderState& other = it->second;
+                if (other.side != state.side) continue;
+                if (strcmp(other.coin, state.coin) != 0) continue;
+                if (other.filledSize <= 0) continue;
+                if (other.status == hl::OrderStatus::Cancelled) continue;
+                if (strncmp(other.orderId, "RESUMED_", 8) == 0) continue;
+                if (strncmp(other.orderId, "IMPORTED_", 9) == 0) continue;
+                multiTracker = true;
+                break;
+            }
+            LeaveCriticalSection(&hl::g_trading.tradeCs);
+        }
+
+        double actualSize;
+        bool soleMode = !multiTracker;
+        if (soleMode) {
+            // Sole tracker: live aggregate IS this trade's share
+            actualSize = fabs(livePos.size);
+            if (state.filledSize != actualSize) {
+                state.filledSize = actualSize;
+                hl::trading::storeOrder(tradeId, state);
+            }
+        } else {
+            // Multi-tracker: this trade's recorded share (set by BrokerBuy2
+            // snapshot + decremented by BrokerSell2 hook)
+            actualSize = state.filledSize;
+        }
+
+        double entryPx = state.avgPrice > 0 ? state.avgPrice : livePos.entryPrice;
         if (pOpen) *pOpen = entryPx;
         if (pRoll) *pRoll = 0;
-        if (pProfit && entryPx > 0) {
+        if (pProfit && entryPx > 0 && actualSize > 0) {
             hl::PriceData price = hl::market::getPrice(state.coin);
             double currentPx = price.mid > 0 ? price.mid : price.ask;
             if (currentPx > 0) {
@@ -447,8 +545,9 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
             : (int)round(actualSize);
         if (fillLots < 1 && actualSize > 0) fillLots = 1;
         if (hl::g_config.diagLevel >= 2)
-            hl::g_logger.logf(2, "BrokerTrade: IMPORTED %d -> %d lots (live=%.6f, orig=%.6f)",
-                              tradeId, fillLots, actualSize, state.filledSize);
+            hl::g_logger.logf(2, "BrokerTrade: IMPORTED %d -> %d lots (%s, share=%.6f, live=%.6f)",
+                              tradeId, fillLots, soleMode ? "sole" : "multi",
+                              actualSize, fabs(livePos.size));
         return fillLots;
     }
 
