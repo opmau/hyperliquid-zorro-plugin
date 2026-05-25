@@ -336,6 +336,11 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
             hl::OrderState state;
             strncpy_s(state.coin, pos.coin.c_str(), _TRUNCATE);
             state.side = (pos.size > 0) ? hl::OrderSide::Buy : hl::OrderSide::Sell;
+            // [OPM-680] state.filledSize tracks THIS tradeID's share of the
+            // broker position (not the live aggregate). Initialized to the
+            // import-time size; BrokerSell2 decrements it on close. See
+            // hl_broker_trade.cpp:411 (BrokerTrade IMPORTED_ branch) and
+            // hl_broker_trade.cpp:315 (BrokerSell2 close hook) for details.
             state.filledSize = fabs(pos.size);
             state.avgPrice = pos.entryPrice;
             state.status = hl::OrderStatus::Filled;
