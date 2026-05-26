@@ -30,7 +30,7 @@ Connection::Connection()
     : queueEvent_(NULL), disconnectPending_(false),
       autoReconnect_(false), reconnected_(false), hasConnectedOnce_(false),
       connected_(false), state_(ConnectionState::Disconnected),
-      lastMessageTime_(0), lastError_(0),
+      lastMessageTime_(0), connectedAt_(0), lastError_(0),
       disconnectReason_(DisconnectReason::None), disconnectError_(0),
       messageHandler_(nullptr), logCallback_(nullptr), logLevel_(0),
       ixMessageCount_(0), pollDispatchCount_(0) {
@@ -119,6 +119,7 @@ void Connection::onIxMessage(const ix::WebSocketMessagePtr& msg) {
             connected_ = true;
             state_ = ConnectionState::Connected;
             lastMessageTime_ = time(NULL);
+            connectedAt_ = time(NULL);  // [OPM-681] anchor for send-failure timing
             // Set reconnected flag if this isn't the first Open [OPM-128]
             if (hasConnectedOnce_) {
                 reconnected_ = true;
@@ -301,13 +302,30 @@ bool Connection::send(const char* message) {
 
 bool Connection::send(const char* message, size_t len) {
     if (!connected_) {
+        // [OPM-681] Diagnose early-return — distinguishes "app saw connected=false"
+        // from "IXWebSocket refused send" cases.
+        ix::ReadyState rs = ws_.getReadyState();
+        time_t openedAt = connectedAt_.load();
+        long elapsed = (openedAt > 0) ? static_cast<long>(time(NULL) - openedAt) : -1;
+        logf(2, "WS: send() early-return: app connected=false, ix readyState=%s, %lds since last Open",
+             ix::WebSocket::readyStateToString(rs).c_str(), elapsed);
         return false;
     }
 
     auto result = ws_.send(std::string(message, len));
 
     if (!result.success) {
-        logf(1, "WS: Send failed");
+        // [OPM-681] Capture IXWebSocket internal state when send() reports failure.
+        // Hypothesis discriminator:
+        //   readyState=Open      → IXWebSocket thinks socket is fine; SendInfo failed for another reason (e.g. compression)
+        //   readyState=Connecting→ race: app saw connected_=true after our `connected_ = true` on Open, but IX still in handshake
+        //   readyState=Closing/Closed → connection died between isConnected() check and send()
+        ix::ReadyState rs = ws_.getReadyState();
+        time_t openedAt = connectedAt_.load();
+        long elapsed = (openedAt > 0) ? static_cast<long>(time(NULL) - openedAt) : -1;
+        logf(1, "WS: Send failed (ix readyState=%s, %lds since Open, payload=%zu, compressionError=%d)",
+             ix::WebSocket::readyStateToString(rs).c_str(), elapsed,
+             result.payloadSize, result.compressionError ? 1 : 0);
         disconnectReason_ = DisconnectReason::NetworkError;
         connected_ = false;
         state_ = ConnectionState::Disconnected;
