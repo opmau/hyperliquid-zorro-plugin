@@ -91,6 +91,11 @@ public:
     time_t lastMessageTime() const { return lastMessageTime_.load(); }
     DWORD getLastError() const { return lastError_; }
 
+    // [OPM-681] Wall-clock time of the most recent WebSocketMessageType::Open
+    // callback. Used by ws_manager to time-stamp the gap between WS open and
+    // the first subscribe send — diagnoses race vs gateway-instability theories.
+    time_t connectedAt() const { return connectedAt_.load(); }
+
     // [OPM-550] H2 instrumentation: counts WebSocket Message frames received
     // by the IXWebSocket internal thread vs the number our poll() has
     // dispatched. Divergence between the two indicates which side of the
@@ -150,6 +155,7 @@ private:
     std::atomic<bool> connected_;
     std::atomic<ConnectionState> state_;
     std::atomic<time_t> lastMessageTime_;
+    std::atomic<time_t> connectedAt_;  // [OPM-681] last Open-callback timestamp
     DWORD lastError_;
     std::atomic<DisconnectReason> disconnectReason_;
     DWORD disconnectError_;

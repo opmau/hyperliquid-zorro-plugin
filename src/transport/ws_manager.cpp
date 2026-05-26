@@ -426,7 +426,7 @@ void WebSocketManager::subscribeL2Book(const std::string& coin) {
             }
             pendingL2Subs_.push_back(coin);
             LeaveCriticalSection(&l2SubCs_);
-            logf(1, "WS: Failed to send l2Book subscription for %s, queuing for retry", coin.c_str());
+            logf(1, "WS: Failed to send l2Book subscription for %s, queuing for retry (%lds since WS open) [OPM-681]", coin.c_str(), connection_.connectedAt() > 0 ? (long)(time(NULL) - connection_.connectedAt()) : -1L);
         }
     } else {
         // Not connected — queue for later [OPM-142]
@@ -503,7 +503,7 @@ void WebSocketManager::sendPendingL2Subscriptions() {
                  "{\"type\":\"l2Book\",\"coin\":\"%s\"}}", toSend[i].c_str());
         if (diagLevel_ >= 2) logf(2, "WS: Subscribe l2Book: %s", toSend[i].c_str());
         if (!connection_.send(sub)) {
-            logf(1, "WS: Failed to send l2Book subscription for %s", toSend[i].c_str());
+            logf(1, "WS: Failed to send l2Book subscription for %s (drainer, %lds since WS open) [OPM-681]", toSend[i].c_str(), connection_.connectedAt() > 0 ? (long)(time(NULL) - connection_.connectedAt()) : -1L);
             // Re-queue unsent coins for retry on next iteration [OPM-99]
             EnterCriticalSection(&l2SubCs_);
             for (size_t j = i; j < toSend.size(); ++j)
