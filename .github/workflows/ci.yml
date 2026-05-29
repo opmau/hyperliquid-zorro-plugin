@@ -45,6 +45,27 @@ jobs:
           vcpkgGitCommitId: 'b2cb0da531c2f1f740045bfe7c4dac59f0b2b69c'
           runVcpkgInstall: false
 
+      # The Zorro SDK headers (include/trading.h, include/variables.h) are
+      # proprietary (c) oP group and are NOT committed to this public repo
+      # (include/ is gitignored). The API layer needs them, so CI pulls them
+      # from a private repo using a token secret. One-time setup:
+      #   1. Create a private repo (default: opmau/zorro-sdk) containing
+      #      trading.h and variables.h at its root.
+      #   2. Create a fine-grained PAT with read access to that repo.
+      #   3. Add it as an Actions secret named ZORRO_SDK_TOKEN.
+      - name: Fetch Zorro SDK headers (private)
+        uses: actions/checkout@v4
+        with:
+          repository: opmau/zorro-sdk
+          token: ${{ secrets.ZORRO_SDK_TOKEN }}
+          path: .zorro-sdk
+      - name: Stage Zorro SDK headers
+        shell: bash
+        run: |
+          mkdir -p include
+          cp .zorro-sdk/trading.h .zorro-sdk/variables.h include/
+          echo "Staged trading.h + variables.h into include/"
+
       - name: Configure CMake (Dev, Win32)
         shell: cmd
         run: |
