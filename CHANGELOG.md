@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.5] — 2026-05-29
+
+### Fixed
+
+- **Reconcile double-count blocked further trading after EXTEND orders** ([OPM-680]):
+  `BrokerTrade`'s `IMPORTED_` branch returned the broker's live aggregate position
+  size, which double-counted when a same-side `BrokerBuy2` created a new tradeID
+  alongside an existing `IMPORTED_` position. Zorro then saw e.g. `-0.30075` BTC while
+  Hyperliquid held `-0.21060`, the reconcile delta exceeded the strategy's $500 HALT
+  threshold, and every subsequent daily rebalance was skipped. Fixed with per-tradeID
+  share accounting so each tradeID reports only its own portion. Observed on the live
+  YOLO_HL_Native rebalance (2026-05-24): BTC and XRP each drifted by exactly one
+  prior order's size.
+
+### Added
+
+- **WS send-failure diagnostics** ([OPM-681]): instruments the `connection_.send()`
+  failure paths to capture IXWebSocket `readyState` and seconds-since-Open when a send
+  fails. Discriminates the hypothesised causes of silent l2Book/subscription failures
+  at startup (pre-Open race vs. mid-flight disconnect vs. compression error) so the
+  root cause of WS reconnect storms and partial `clearinghouseState` snapshots can be
+  identified from production logs.
+
+### CI
+
+- **vcpkg GHA binary caching disabled** ([commit 4178d84]): `VCPKG_BINARY_SOURCES=clear`
+  so CMake configure no longer aborts requiring `ACTIONS_RUNTIME_TOKEN`/`ACTIONS_CACHE_URL`.
+  Combined with the v2.0.4 vcpkg-SHA pin, this should let the release workflow build and
+  publish automatically. (Committed after the v2.0.4 tag, so v2.0.4's CI run still failed.)
+
 ## [2.0.4] — 2026-05-21
 
 ### Added
