@@ -69,6 +69,21 @@ jobs:
           vcpkgGitCommitId: 'b2cb0da531c2f1f740045bfe7c4dac59f0b2b69c'
           runVcpkgInstall: false
 
+      # Proprietary Zorro SDK headers (not committed — see ci.yml for setup).
+      # Pulled from a private repo via the ZORRO_SDK_TOKEN secret.
+      - name: Fetch Zorro SDK headers (private)
+        uses: actions/checkout@v4
+        with:
+          repository: opmau/zorro-sdk
+          token: ${{ secrets.ZORRO_SDK_TOKEN }}
+          path: .zorro-sdk
+      - name: Stage Zorro SDK headers
+        shell: bash
+        run: |
+          mkdir -p include
+          cp .zorro-sdk/trading.h .zorro-sdk/variables.h include/
+          echo "Staged trading.h + variables.h into include/"
+
       - name: Configure CMake (production, Win32, DEV_BUILD=OFF)
         shell: cmd
         run: |

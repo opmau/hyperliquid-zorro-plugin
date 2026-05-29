@@ -104,6 +104,9 @@ Strategy/
 include/
 Source/
 
+# CI-fetched private Zorro SDK headers (see .github/workflows)
+.zorro-sdk/
+
 # Third-party editors
 Notepad++/
 
