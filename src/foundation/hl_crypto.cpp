@@ -16,11 +16,11 @@
 // Enable recovery module for Ethereum-style signatures
 #define ENABLE_MODULE_RECOVERY
 #define BT_SECP256K1_IMPLEMENTATION
-#include "../../Source/HyperliquidPlugin/crypto/bt_secp256k1.h"
+#include "../vendor/secp256k1/bt_secp256k1.h"
 
 // Keccak-256 for Ethereum address derivation
 extern "C" {
-#include "../../Source/HyperliquidPlugin/crypto/keccak256.h"
+#include "../vendor/secp256k1/keccak256.h"
 }
 
 namespace hl {
