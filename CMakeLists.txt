@@ -37,7 +37,7 @@ add_library(hl_foundation STATIC
 )
 target_include_directories(hl_foundation PUBLIC
     ${CMAKE_SOURCE_DIR}/src/foundation
-    ${CMAKE_SOURCE_DIR}/Source/HyperliquidPlugin/crypto
+    ${CMAKE_SOURCE_DIR}/src/vendor/secp256k1
 )
 
 #=============================================================================
@@ -95,10 +95,10 @@ target_link_libraries(hl_services
 # Note: EIP-712 is now in hl_foundation as hl_eip712.cpp
 #=============================================================================
 add_library(hl_crypto_impl STATIC
-    Source/HyperliquidPlugin/crypto/keccak256.c
+    src/vendor/secp256k1/keccak256.c
 )
 target_include_directories(hl_crypto_impl PUBLIC
-    ${CMAKE_SOURCE_DIR}/Source/HyperliquidPlugin/crypto
+    ${CMAKE_SOURCE_DIR}/src/vendor/secp256k1
 )
 
 #=============================================================================
