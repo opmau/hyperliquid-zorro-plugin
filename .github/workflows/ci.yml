@@ -1,0 +1,74 @@
+# CI
+# Continuous build + unit-test check on every push and pull request to the
+# main development branches. Proves the repo is self-contained (a clean clone
+# builds with no local-only dependencies) and runs the fast unit tests.
+#
+# This complements release.yml (which builds + publishes the production DLL on
+# a v* tag). CI builds the Dev DLL and does not publish anything.
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+# Avoid redundant runs when pushing to a branch that has an open PR.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    # Disable vcpkg GHA binary caching (see release.yml for rationale).
+    env:
+      VCPKG_BINARY_SOURCES: clear
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Set up Developer Command Prompt (Win32)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x86
+
+      - name: Set up vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          # Full 40-char commit SHA of the 2024.11.16 vcpkg release tag.
+          vcpkgGitCommitId: 'b2cb0da531c2f1f740045bfe7c4dac59f0b2b69c'
+          runVcpkgInstall: false
+
+      - name: Configure CMake (Dev, Win32)
+        shell: cmd
+        run: |
+          mkdir build_ci
+          cd build_ci
+          cmake .. -G "Visual Studio 17 2022" -A Win32 -DDEV_BUILD=ON ^
+            -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake ^
+            -DVCPKG_TARGET_TRIPLET=x86-windows-static
+
+      - name: Build plugin DLL
+        shell: cmd
+        run: cmake --build build_ci --config Release --target Hyperliquid
+
+      - name: Verify DLL produced
+        shell: bash
+        run: |
+          if [ ! -f "build_ci/Release/Hyperliquid_Dev.dll" ]; then
+            echo "::error::Hyperliquid_Dev.dll not produced"
+            exit 1
+          fi
+          echo "DLL size: $(stat -c%s build_ci/Release/Hyperliquid_Dev.dll) bytes"
+
+      - name: Build + run unit tests
+        shell: cmd
+        run: |
+          cmake --build build_ci --config Release --target test_ws_price_cache
+          build_ci\Release\test_ws_price_cache.exe
