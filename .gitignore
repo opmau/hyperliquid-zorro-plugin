@@ -82,6 +82,7 @@ build/.cmake/
 build/x64/
 build_vcpkg/
 build_prod/
+build_ci/
 build32/
 
 # Other binary/compiled
