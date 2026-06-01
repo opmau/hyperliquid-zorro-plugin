@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.6] — 2026-06-01
+
+Infrastructure-only release — no functional plugin changes since v2.0.5. Makes
+the repository self-contained so it builds from a clean clone and enables full
+CI/CD (the release DLL is now built and published automatically on tag).
+
+### Build
+
+- **Vendored crypto sources** into `src/vendor/secp256k1/` ([OPM-681]): the build
+  depended on `Source/HyperliquidPlugin/crypto/keccak256.c`, but `Source/` is
+  gitignored (it is a local Zorro install junction), so a clean clone could not
+  build. Moved `keccak256.c/.h` and the single-header `bt_secp256k1.h` under
+  `src/vendor/secp256k1/` (matching the existing `src/vendor/yyjson/` convention)
+  with a LICENSE noting the MIT (bitcoin-core libsecp256k1) and public-domain
+  (keccak) origins. Repointed CMake and `hl_crypto.cpp` at the new path.
+
+### CI
+
+- **Continuous integration** (`ci.yml`): builds the Dev DLL and runs unit tests
+  on every push and pull request to `develop`/`main`. Proves the repo stays
+  self-contained.
+- **Zorro SDK headers fetched at build time**: `include/trading.h` and
+  `include/variables.h` are proprietary ((c) oP group) and are not committed.
+  Both CI and release workflows download the official Zorro beta distribution,
+  cache it, and extract only those two headers before configure — no secret and
+  no one-time setup required. Verified the `TRADE` struct ABI is byte-identical
+  to the installed Zorro 3.016 headers, so CI-built DLLs are runtime-compatible.
+- Earlier release-workflow fixes now combine to make tagged releases build and
+  publish automatically: vcpkg pinned to a full commit SHA, and
+  `VCPKG_BINARY_SOURCES=clear` to avoid the GHA binary-cache requirement.
+
 ## [2.0.5] — 2026-05-29
 
 ### Fixed
