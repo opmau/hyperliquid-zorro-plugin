@@ -47,23 +47,25 @@ jobs:
 
       # The Zorro SDK headers (include/trading.h, include/variables.h) are
       # proprietary (c) oP group and are NOT committed to this public repo
-      # (include/ is gitignored). The API layer needs them, so CI pulls them
-      # from a private repo using a token secret. One-time setup:
-      #   1. Create a private repo (default: opmau/zorro-sdk) containing
-      #      trading.h and variables.h at its root.
-      #   2. Create a fine-grained PAT with read access to that repo.
-      #   3. Add it as an Actions secret named ZORRO_SDK_TOKEN.
-      - name: Fetch Zorro SDK headers (private)
-        uses: actions/checkout@v4
+      # (include/ is gitignored). The API layer needs them, so CI extracts just
+      # those two headers from the official Zorro beta distribution. No secret
+      # required. The full installer is never run — we only unzip two headers.
+      - name: Cache Zorro SDK zip
+        id: zorro-cache
+        uses: actions/cache@v4
         with:
-          repository: opmau/zorro-sdk
-          token: ${{ secrets.ZORRO_SDK_TOKEN }}
-          path: .zorro-sdk
+          path: zorro-sdk.zip
+          key: zorro-beta-sdk-zip-v1
+      - name: Download Zorro beta (for SDK headers)
+        if: steps.zorro-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: curl -fsSL -o zorro-sdk.zip https://opserver.de/down/ZorroBeta.zip
       - name: Stage Zorro SDK headers
         shell: bash
         run: |
           mkdir -p include
-          cp .zorro-sdk/trading.h .zorro-sdk/variables.h include/
+          unzip -o -j zorro-sdk.zip "ZorroBeta/include/trading.h" "ZorroBeta/include/variables.h" -d include
+          test -f include/trading.h && test -f include/variables.h
           echo "Staged trading.h + variables.h into include/"
 
       - name: Configure CMake (Dev, Win32)
