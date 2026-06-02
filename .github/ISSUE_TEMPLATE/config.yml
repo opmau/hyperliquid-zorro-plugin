@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/opmau/hyperliquid-zorro-plugin/security/advisories/new
+    about: Report security issues privately, not as a public issue (see SECURITY.md).
+  - name: Zorro platform help
+    url: https://zorro-project.com/
+    about: Questions about Zorro itself (not this plugin) belong upstream.
+  - name: Hyperliquid API docs
+    url: https://hyperliquid.gitbook.io/hyperliquid-docs/
+    about: Reference for the exchange API this plugin targets.

@@ -17,16 +17,16 @@ cd /d "%~dp0"
 
 echo Include paths:
 echo   - ..\src\foundation
-echo   - ..\Source\HyperliquidPlugin\crypto
+echo   - ..\src\vendor\secp256k1
 echo.
 
 echo Compiling...
 cl /nologo /EHsc /std:c++14 ^
    /I..\src\foundation ^
-   /I..\Source\HyperliquidPlugin\crypto ^
+   /I..\src\vendor\secp256k1 ^
    test_crypto_compile.cpp ^
    ..\src\foundation\hl_crypto.cpp ^
-   ..\Source\HyperliquidPlugin\crypto\keccak256.c ^
+   ..\src\vendor\secp256k1\keccak256.c ^
    /Fe:test_crypto.exe
 
 if errorlevel 1 (

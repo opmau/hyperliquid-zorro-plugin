@@ -36,5 +36,15 @@ MIT License:
 -------------------------------------------------------------------------------
 keccak256.c / keccak256.h
 -------------------------------------------------------------------------------
-Keccak-256 (SHA-3) implementation based on the reference implementation.
-Public domain.
+Keccak-256 implementation (Ethereum-compatible "pre-FIPS" Keccak, not the final
+SHA-3 standard), derived from the public-domain reference implementation by the
+Keccak/SHA-3 designers.
+
+  Reference: https://github.com/XKCP/XKCP (Keccak Code Package)
+  Algorithm authors: Guido Bertoni, Joan Daemen, Michael Peeters, Gilles Van Assche
+
+Public domain dedication: To the extent possible under law, the authors have
+dedicated this implementation to the public domain (CC0 1.0 Universal). It is
+provided "as is", without warranty of any kind. You may copy, modify, and
+distribute it, for any purpose, without attribution.
+  https://creativecommons.org/publicdomain/zero/1.0/
