@@ -1,10 +1,10 @@
 @echo off
 REM Compile-only test for WebSocket modules (/c = compile only, no linking)
-REM Run from: c:\Users\admki\OneDrive\Zorro-plugin\build\
+REM Run from anywhere (paths resolved relative to this script)
 
 call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars32.bat"
 
-cd /d "C:\Users\admki\OneDrive\Zorro-plugin"
+cd /d "%~dp0.."
 
 echo.
 echo === Compile-only check for WebSocket modules ===

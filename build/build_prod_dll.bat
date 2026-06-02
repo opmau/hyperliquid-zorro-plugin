@@ -1,6 +1,6 @@
 @echo off
 REM build_prod_dll.bat - Build Hyperliquid.dll (PRODUCTION) via CMake + vcpkg (32-bit)
-REM Run from: c:\Users\admki\OneDrive\Zorro-plugin\build\
+REM Run from anywhere; paths are resolved relative to this script's location.
 REM
 REM Output: build_prod\Release\Hyperliquid.dll  (no _Dev suffix)
 REM
@@ -8,7 +8,10 @@ REM This is the RELEASE build. Does NOT auto-deploy to Zorro\Plugin — that ste
 REM is manual after mainnet smoke tests pass.
 
 setlocal
-set PROJECT_ROOT=C:\Users\admki\OneDrive\Zorro-plugin
+REM Resolve the repository root relative to this script (build\ is one level down)
+pushd "%~dp0.."
+set PROJECT_ROOT=%CD%
+popd
 set BUILD_DIR=%PROJECT_ROOT%\build_prod
 set CMAKE_EXE="C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
 set VCVARS="C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars32.bat"
@@ -57,6 +60,6 @@ echo Production DLL ready at:
 echo   %BUILD_DIR%\Release\Hyperliquid.dll
 echo.
 echo To deploy (only after mainnet smoke tests pass):
-echo   copy /Y "%BUILD_DIR%\Release\Hyperliquid.dll" "C:\Users\admki\OneDrive\Zorro\Plugin\Hyperliquid.dll"
+echo   copy /Y "%BUILD_DIR%\Release\Hyperliquid.dll" "%%ZORRO_HOME%%\Plugin\Hyperliquid.dll"
 echo.
 endlocal

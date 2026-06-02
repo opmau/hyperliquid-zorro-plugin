@@ -19,12 +19,12 @@ echo.
 
 cl /nologo /EHsc /std:c++14 ^
    /I. /I..\src\foundation ^
-   /I..\Source\HyperliquidPlugin\crypto ^
+   /I..\src\vendor\secp256k1 ^
    unit\test_schedule_cancel.cpp ^
    ..\src\foundation\hl_eip712.cpp ^
    ..\src\foundation\hl_msgpack.cpp ^
    ..\src\foundation\hl_crypto.cpp ^
-   ..\Source\HyperliquidPlugin\crypto\keccak256.c ^
+   ..\src\vendor\secp256k1\keccak256.c ^
    /Fe:test_schedule_cancel.exe
 
 if errorlevel 1 (
