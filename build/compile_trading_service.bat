@@ -3,7 +3,7 @@ REM Compile-only check for hl_trading_service
 
 call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars32.bat" >nul 2>&1
 
-cd /d "C:\Users\admki\OneDrive\Zorro-plugin"
+cd /d "%~dp0.."
 
 echo.
 echo === Compile hl_trading_service.cpp ===

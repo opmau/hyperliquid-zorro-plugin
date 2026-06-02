@@ -41,10 +41,10 @@ HyperliquidPlugin/
 │   ├── transport/               # Layer 2: HTTP, WebSocket, price cache
 │   ├── services/                # Layer 3: market data, trading, account
 │   ├── api/                     # Layer 4: Zorro broker interface (DLL exports)
-│   └── vendor/yyjson/           # Bundled JSON parser
-├── include/                     # Zorro SDK headers (trading.h, variables.h)
-├── lib/                         # Static libraries (secp256k1)
-├── Source/                      # C crypto implementations (keccak256)
+│   └── vendor/                  # Bundled third-party libraries
+│       ├── yyjson/              #   JSON parser (MIT)
+│       └── secp256k1/           #   secp256k1 (MIT) + keccak256 (public domain)
+├── include/                     # Zorro SDK headers (trading.h, variables.h) — not committed
 ├── tests/                       # Unit tests and regression suite
 │   ├── test_framework.h         # Lightweight assertion macros
 │   ├── mocks/mock_zorro.h       # Zorro SDK function mocks

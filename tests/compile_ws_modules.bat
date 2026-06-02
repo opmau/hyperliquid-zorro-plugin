@@ -24,7 +24,7 @@ if "%VCVARS%"=="" (
 echo Using: %VCVARS%
 call "%VCVARS%" >nul 2>&1
 
-cd /d "C:\Users\admki\OneDrive\Zorro-plugin"
+cd /d "%~dp0.."
 
 REM Create build directory if needed
 if not exist build mkdir build

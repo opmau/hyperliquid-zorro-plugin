@@ -123,6 +123,11 @@ docs/LINEAR_SNAPSHOT.md
 # Environment variables (may contain API keys)
 .env
 
+# Credentials — Zorro account list contains PLAINTEXT private keys. Never commit.
+Accounts.csv
+**/Accounts.csv
+rw_api_key.txt
+
 # Scraped documentation (regenerated locally, not source of truth)
 docs/zorro_docs/
 docs/hyperliquid_docs/

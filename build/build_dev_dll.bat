@@ -1,6 +1,9 @@
 @echo off
 REM build_dev_dll.bat - Build Hyperliquid_Dev.dll from modular sources (32-bit)
-REM Run from: c:\Users\admki\OneDrive\Zorro-plugin\build\
+REM Run from anywhere; paths are resolved relative to this script's location.
+REM NOTE: legacy direct-cl.exe helper. The supported build is CMake (see README);
+REM this references the gitignored Source\ junction and only works on a machine
+REM with a local Zorro install.
 
 call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars32.bat" >nul 2>&1
 if errorlevel 1 (
@@ -8,7 +11,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-cd /d "C:\Users\admki\OneDrive\Zorro-plugin"
+REM Repository root = parent of this script's build\ directory
+cd /d "%~dp0.."
 
 echo.
 echo === Building Hyperliquid_Dev.dll (Modular 32-bit) ===
@@ -63,14 +67,19 @@ echo === BUILD SUCCESS ===
 dir build\Hyperliquid_Dev.dll
 echo.
 
-REM Deploy to Zorro Plugin folder
+REM Deploy to Zorro Plugin folder (set ZORRO_HOME to your Zorro install path)
+if "%ZORRO_HOME%"=="" (
+    echo Skipping deploy: set ZORRO_HOME to your Zorro install path to auto-deploy.
+    goto :done
+)
 echo Deploying to Zorro Plugin folder...
-copy /Y "build\Hyperliquid_Dev.dll" "C:\Users\admki\OneDrive\Zorro\Plugin\Hyperliquid_Dev.dll"
+copy /Y "build\Hyperliquid_Dev.dll" "%ZORRO_HOME%\Plugin\Hyperliquid_Dev.dll"
 if errorlevel 1 (
     echo WARNING: Could not copy to Plugin folder
 ) else (
     echo Deployed to Plugin\Hyperliquid_Dev.dll
 )
 
+:done
 echo.
 echo Done!
