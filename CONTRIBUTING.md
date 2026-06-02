@@ -8,7 +8,7 @@ Thanks for your interest in improving the Hyperliquid plugin for Zorro!
   than speed — see [docs/dev/GOTCHAS.md](docs/dev/GOTCHAS.md) for the pitfalls
   that have caused real losses.
 - By contributing, you agree your contributions are licensed under the project's
-  [MIT License](LICENSE).
+  [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
 - Security issues: do **not** open a public issue — see [SECURITY.md](SECURITY.md).
 
 ## Development setup

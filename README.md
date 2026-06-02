@@ -1,7 +1,7 @@
 # Hyperliquid Plugin for Zorro
 
 [![CI](https://github.com/opmau/hyperliquid-zorro-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/opmau/hyperliquid-zorro-plugin/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 A broker plugin that connects the [Zorro](https://zorro-project.com/) algorithmic trading platform to the [Hyperliquid](https://hyperliquid.xyz/) decentralized exchange.
 
@@ -191,6 +191,13 @@ Under active development. Currently supports:
 
 ## License
 
-[MIT](LICENSE). Vendored third-party components retain their own licenses — see
-`src/vendor/*/LICENSE`. The Zorro SDK headers are © oP group and are not
-included in this repository.
+[GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
+
+This is copyleft: you are free to use, study, and modify the plugin, but any
+distributed or network-served derivative must also be released under the
+AGPL-3.0. This keeps modifications open and prevents closed-source resale. For a
+commercial/proprietary license, contact the maintainer.
+
+Vendored third-party components under `src/vendor/` retain their own permissive
+licenses (MIT / public domain) — see `src/vendor/*/LICENSE`. The Zorro SDK
+headers are © oP group and are not included in this repository.
