@@ -11,6 +11,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.7] — 2026-06-17
+
+Fixes a position-tracking defect that corrupted Zorro's trade ledger and
+froze the daily rebalance. Validated by ~1 week of live trading before release.
+
+### Fixed
+
+- **BrokerTrade reported the wrong open size after a partial close or a
+  second same-side extend** ([OPM-733]). Zorro's automatic BrokerTrade
+  fill-poll overwrites its trade ledger with the plugin's return value; the
+  plugin returned a stale/inflated size via two paths, so Zorro's books
+  diverged from Hyperliquid and the strategy's reconcile guard halted every
+  rebalance until a manual `.trd` resync:
+  - Mapped trades now record Zorro-driven closes in a new `closedSize` field
+    and BrokerTrade reports `filledSize - closedSize` (net open), instead of
+    re-reporting the entry order's gross fill (e.g. 61796 after a reduce to
+    58508).
+  - The OPM-680 pre-extend share snapshot now runs only on the sole→multi
+    tracker transition, via a shared `hasOtherSameSideTracker()` predicate
+    that also backs BrokerTrade's reporting — so a second consecutive extend
+    no longer double-counts a sibling's fill into an imported trade's share
+    (81910 → 87741).
+  - A sub-lot epsilon on the net-open size prevents a full close that leaves
+    a tiny float residual from reporting a phantom 1-lot trade.
+
+### Tests / Infrastructure
+
+- Regression tests replaying both OPM-733 incidents with the exact live-log
+  values, plus sub-lot residual cases.
+- Fixed a linker failure that had silently disabled the `ws_parsers` unit
+  test module since OPM-550 ([OPM-734]).
+- Fixed `run_unit_tests.bat` aborting silently after 3 modules (vcvars
+  environment overflow) and qualified inner test-exe launches so the suite
+  runs on machines that exclude the CWD from the executable search path
+  ([OPM-735]).
+
 ## [2.0.6] — 2026-06-01
 
 Infrastructure-only release — no functional plugin changes since v2.0.5. Makes
