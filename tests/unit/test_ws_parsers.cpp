@@ -16,6 +16,12 @@
 #include "ws_parsers.h"
 #include "ws_price_cache.h"
 
+// [OPM-734] ws_price_cache.cpp references hl::g_config (OPM-550 diag gating),
+// but this test links no foundation objects. Provide the one global here —
+// default diagLevel keeps the instrumentation path off during tests.
+#include "../../src/foundation/hl_globals.h"
+namespace hl { RuntimeConfig g_config; }
+
 //=============================================================================
 // HELPERS
 //=============================================================================
