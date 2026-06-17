@@ -15,6 +15,68 @@
 
 #include "hl_broker_internal.h"
 
+//-----------------------------------------------------------------------------
+// [OPM-733] Shared regime predicate: does another Zorro-visible tradeID track
+// part of this asset+side? BrokerBuy2's pre-extend snapshot and BrokerTrade's
+// IMPORTED_ reporting must use the SAME answer — if the snapshot runs while
+// already in multi-tracker mode, it absorbs a sibling tradeID's fill into the
+// IMPORTED_ share and Zorro's ledger inflates by exactly that amount.
+// Counts only non-IMPORTED_/non-RESUMED_, non-cancelled entries with net open
+// size (filledSize - closedSize) > 0, so trades fully closed by Zorro stop
+// counting and the IMPORTED_ trade returns to sole-tracker self-healing.
+//-----------------------------------------------------------------------------
+static bool hasOtherSameSideTracker(int excludeTradeId, const char* coin,
+                                    hl::OrderSide side) {
+    if (!hl::g_trading.tradeCsInit) return false;
+    bool found = false;
+    EnterCriticalSection(&hl::g_trading.tradeCs);
+    for (auto it = hl::g_trading.tradeMap.begin();
+         it != hl::g_trading.tradeMap.end(); ++it) {
+        if (it->first == excludeTradeId) continue;
+        const hl::OrderState& other = it->second;
+        if (other.side != side) continue;
+        if (strcmp(other.coin, coin) != 0) continue;
+        // [OPM-733] Net open size, with a sub-lot epsilon so a sibling that is
+        // fully closed but left a tiny float residual stops counting as a
+        // tracker (otherwise the IMPORTED_ trade never returns to sole mode).
+        const double lotEps = (hl::g_trading.lotSize > 0)
+            ? hl::g_trading.lotSize * 0.5 : 1e-9;
+        if (other.filledSize - other.closedSize < lotEps) continue;
+        if (other.status == hl::OrderStatus::Cancelled) continue;
+        if (strncmp(other.orderId, "RESUMED_", 8) == 0) continue;
+        if (strncmp(other.orderId, "IMPORTED_", 9) == 0) continue;
+        found = true;
+        break;
+    }
+    LeaveCriticalSection(&hl::g_trading.tradeCs);
+    return found;
+}
+
+//-----------------------------------------------------------------------------
+// [OPM-680][OPM-733] Account for a Zorro-driven close against a trade's
+// reported size. BrokerTrade's fill-poll reports the open size back to Zorro,
+// and Zorro overwrites its ledger with whatever we return — so every path
+// that confirms a close to Zorro must record it here.
+//   - IMPORTED_ trades: filledSize IS the trade's position share; decrement
+//     it directly (OPM-680).
+//   - Mapped trades: filledSize is the ENTRY order's cumulative fill, and
+//     WS/HTTP lookups re-derive it from the exchange — decrementing it would
+//     be undone by the next lookup. Accumulate closes in closedSize instead;
+//     BrokerTrade reports filledSize - closedSize (OPM-733 incident 1:
+//     partial close re-reported as the gross entry fill).
+//-----------------------------------------------------------------------------
+static void recordZorroClose(int tradeId, hl::OrderState& state, double closeSz) {
+    if (closeSz <= 0) return;
+    if (strncmp(state.orderId, "IMPORTED_", 9) == 0) {
+        double newShare = state.filledSize - closeSz;
+        if (newShare < 0) newShare = 0;
+        state.filledSize = newShare;
+    } else {
+        state.closedSize += closeSz;
+    }
+    hl::trading::storeOrder(tradeId, state);
+}
+
 //=============================================================================
 // BrokerBuy2 - Place order
 //=============================================================================
@@ -153,7 +215,13 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
     // changes). See BrokerTrade IMPORTED_ branch and tests/test_imported_trades.
     // Skipped for close orders (opposite direction) and trigger orders (not
     // filled yet) — neither establishes multi-tracker mode.
-    if (!isCloseOrder && !isTriggerOrder && hl::g_trading.tradeCsInit) {
+    // [OPM-733] Only valid on the sole->multi transition: once another tradeID
+    // already tracks part of the position, the live aggregate includes that
+    // sibling's fill, and snapshotting would absorb it into the IMPORTED_
+    // share (double-count). In multi-tracker mode the share is already
+    // maintained by BrokerSell2's decrement hook — leave it untouched.
+    if (!isCloseOrder && !isTriggerOrder && hl::g_trading.tradeCsInit
+        && !hasOtherSameSideTracker(tradeId, coinForApi.c_str(), request.side)) {
         double currentLive = fabs(hl::account::getPosition(coinForApi.c_str()).size);
         EnterCriticalSection(&hl::g_trading.tradeCs);
         for (auto it = hl::g_trading.tradeMap.begin();
@@ -257,6 +325,10 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
             }
             if (pProfit) *pProfit = 0;
             if (pFill) *pFill = abs(amount);
+            // [OPM-733] We confirmed a close to Zorro — record it so the
+            // fill-poll doesn't resurrect the pre-close size.
+            recordZorroClose(tradeId, state,
+                             fabs((double)amount) * hl::g_trading.lotSize);
             return tradeId;
         }
     }
@@ -315,6 +387,9 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
             }
             if (pProfit) *pProfit = 0;
             if (pFill) *pFill = abs(amount);
+            // [OPM-733] We confirmed a close to Zorro — record it so the
+            // fill-poll doesn't resurrect the pre-close size.
+            recordZorroClose(tradeId, state, closeSize);
             return tradeId;
         }
         hl::g_logger.logf(1, "BrokerSell2: Close failed - %s", result.error.c_str());
@@ -345,17 +420,9 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
         hl::account::applyFill(state.coin, closeFillSize, closeFillPx, closingBuy);
     }
 
-    // [OPM-680] If the trade being closed is IMPORTED_, decrement its remaining
-    // share. BrokerTrade's IMPORTED_ branch reports state.filledSize as the
-    // trade's share of the broker position; keeping that in sync requires us
-    // to subtract Zorro-driven closes here. Without this, a partial Cover on
-    // an IMPORTED_ trade leaves Zorro polling the stale pre-close size.
-    if (strncmp(state.orderId, "IMPORTED_", 9) == 0 && closeFillSize > 0) {
-        double newShare = state.filledSize - closeFillSize;
-        if (newShare < 0) newShare = 0;
-        state.filledSize = newShare;
-        hl::trading::storeOrder(tradeId, state);
-    }
+    // [OPM-680][OPM-733] Record the Zorro-driven close so BrokerTrade's
+    // fill-poll reports the reduced open size (see recordZorroClose).
+    recordZorroClose(tradeId, state, closeFillSize);
 
     return tradeId;
 }
@@ -489,29 +556,10 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
             return 0;  // Trade closed/reversed
         }
 
-        // Detect multi-tracker regime: is any OTHER Zorro-visible same-side
-        // tradeID present for this asset? Skip RESUMED_ (internal accounting
-        // from GET_POSITION rebuilds; not in Zorro's trade list), other
-        // IMPORTED_ (one per asset/side by construction — guard anyway),
-        // cancelled, and zero-fill entries.
-        bool multiTracker = false;
-        if (hl::g_trading.tradeCsInit) {
-            EnterCriticalSection(&hl::g_trading.tradeCs);
-            for (auto it = hl::g_trading.tradeMap.begin();
-                 it != hl::g_trading.tradeMap.end(); ++it) {
-                if (it->first == tradeId) continue;
-                const hl::OrderState& other = it->second;
-                if (other.side != state.side) continue;
-                if (strcmp(other.coin, state.coin) != 0) continue;
-                if (other.filledSize <= 0) continue;
-                if (other.status == hl::OrderStatus::Cancelled) continue;
-                if (strncmp(other.orderId, "RESUMED_", 8) == 0) continue;
-                if (strncmp(other.orderId, "IMPORTED_", 9) == 0) continue;
-                multiTracker = true;
-                break;
-            }
-            LeaveCriticalSection(&hl::g_trading.tradeCs);
-        }
+        // Detect multi-tracker regime via the shared predicate ([OPM-733]:
+        // must match BrokerBuy2's snapshot gate, and a sibling fully closed
+        // by Zorro no longer counts — sole-tracker self-healing resumes).
+        bool multiTracker = hasOtherSameSideTracker(tradeId, state.coin, state.side);
 
         double actualSize;
         bool soleMode = !multiTracker;
@@ -616,15 +664,30 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
     }
 
     // --- Generic return path ---
+    // [OPM-733] Report the NET open amount: entry fill minus Zorro-driven
+    // closes. Zorro's automatic fill-poll overwrites the trade's lot count
+    // with this return value, so echoing the gross entry fill would undo
+    // partial closes in Zorro's ledger (incident 1: TRX 61796 re-reported
+    // after reduce to 58508).
+    // [OPM-733] Sub-lot epsilon: a full close can leave a tiny positive float
+    // residual (filledSize re-derived from the exchange as a sum of fills vs
+    // separately-accumulated closedSize). Without this, net rounds to 0 lots
+    // but the `:1` floor below would return a phantom 1-lot trade -> reconcile
+    // mismatch, the exact symptom OPM-733 prevents.
+    double openSize = state.filledSize - state.closedSize;
+    const double lotEps = (hl::g_trading.lotSize > 0)
+        ? hl::g_trading.lotSize * 0.5 : 1e-9;
+    if (openSize < lotEps) openSize = 0;
+
     if (pOpen) *pOpen = state.avgPrice;
     if (pRoll) *pRoll = 0;
 
-    if (pProfit && state.avgPrice > 0 && state.filledSize > 0) {
+    if (pProfit && state.avgPrice > 0 && openSize > 0) {
         hl::PriceData price = hl::market::getPrice(state.coin);
         double currentPx = price.mid > 0 ? price.mid : price.ask;
 
         if (currentPx > 0) {
-            double pnl = (currentPx - state.avgPrice) * state.filledSize;
+            double pnl = (currentPx - state.avgPrice) * openSize;
             if (state.side == hl::OrderSide::Sell) pnl = -pnl;
             *pProfit = pnl;
         }
@@ -634,12 +697,12 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
         return NAY - 1;
     }
 
-    if (state.filledSize > 0) {
+    if (openSize > 0) {
         int fillLots = (hl::g_trading.lotSize > 0)
-            ? (int)round(state.filledSize / hl::g_trading.lotSize)
-            : (int)round(state.filledSize);
+            ? (int)round(openSize / hl::g_trading.lotSize)
+            : (int)round(openSize);
         return (fillLots > 0) ? fillLots : 1;
     }
 
-    return 0;  // Pending order
+    return 0;  // Pending order, or entry fully closed by Zorro
 }

@@ -45,7 +45,7 @@ echo.
 
 echo Running test...
 echo.
-test_crypto.exe
+.\test_crypto.exe
 
 if errorlevel 1 (
     echo.

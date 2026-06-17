@@ -2,8 +2,16 @@
 
 [![CI](https://github.com/opmau/hyperliquid-zorro-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/opmau/hyperliquid-zorro-plugin/actions/workflows/ci.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors)](https://github.com/sponsors/opmau)
 
 A broker plugin that connects the [Zorro](https://zorro-project.com/) algorithmic trading platform to the [Hyperliquid](https://hyperliquid.xyz/) decentralized exchange.
+
+> ❤️ **Find this useful?** This plugin is free and open source (AGPL-3.0). If it
+> saves you time or makes you money, please consider
+> [**sponsoring its development**](https://github.com/sponsors/opmau) — it
+> directly funds maintenance, new features, and bug fixes.
+
+<!-- -->
 
 > ⚠️ **Risk warning — read before trading.** This software places real orders on a live exchange with real funds. It is provided "as is", without warranty of any kind (see [LICENSE](LICENSE)). Trading perpetual futures is high-risk and you can lose more than your deposit. **Always test on testnet first**, start with small size, and prefer an [API/agent wallet](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/nonces-and-api-wallets) over your master account's private key. You are solely responsible for any losses. See [SECURITY.md](SECURITY.md) for how to report vulnerabilities.
 

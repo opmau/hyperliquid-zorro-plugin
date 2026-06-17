@@ -27,7 +27,7 @@ if errorlevel 1 (
 echo.
 echo Running tests...
 echo.
-test_get_position_after_fill.exe
+.\test_get_position_after_fill.exe
 set TEST_RESULT=%ERRORLEVEL%
 
 echo.

@@ -9,7 +9,7 @@ if errorlevel 1 (
 )
 echo.
 echo Running test...
-test_perpdex_separator.exe
+.\test_perpdex_separator.exe
 set EXITCODE=%ERRORLEVEL%
 echo.
 echo Cleaning up...

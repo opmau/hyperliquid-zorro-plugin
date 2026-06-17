@@ -9,7 +9,7 @@ if errorlevel 1 (
 )
 echo.
 echo Running test...
-test_globals.exe
+.\test_globals.exe
 echo.
 echo Cleaning up...
 del /Q *.obj 2>nul

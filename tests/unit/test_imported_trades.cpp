@@ -66,7 +66,8 @@ struct ImportedTrade {
 struct RegularTrade {
     char coin[32];
     bool isBuy;
-    double filledSize;       // self-reported fill
+    double filledSize;       // entry order's cumulative fill
+    double closedSize;       // [OPM-733] Zorro-driven closes; reported net
 };
 
 struct CurrentPosition {
@@ -101,7 +102,10 @@ bool hasOtherSameSideTracker(const char* coin, bool isBuy) {
     for (const auto& kv : regularTrades) {
         if (strcmp(kv.second.coin, coin) != 0) continue;
         if (kv.second.isBuy != isBuy) continue;
-        if (kv.second.filledSize <= 0) continue;
+        // [OPM-733] Net open size — a sibling fully closed by Zorro no
+        // longer counts as a tracker (mirrors hasOtherSameSideTracker in
+        // hl_broker_trade.cpp)
+        if (kv.second.filledSize - kv.second.closedSize <= 0) continue;
         return true;
     }
     return false;
@@ -112,16 +116,21 @@ bool hasOtherSameSideTracker(const char* coin, bool isBuy) {
 // then the regular trade tracks its own fill; then live is updated.
 void brokerBuy2Extend(const char* newOrderId, const char* coin, bool isBuy,
                       double size) {
-    // 1. Pre-extend snapshot of any IMPORTED_ same-asset same-side
-    auto livePosIt = currentPositions.find(coin);
-    double preLive = (livePosIt != currentPositions.end())
-        ? ((livePosIt->second.size > 0) ? livePosIt->second.size
-                                        : -livePosIt->second.size)
-        : 0.0;
-    for (auto& kv : importedTrades) {
-        if (strcmp(kv.second.coin, coin) != 0) continue;
-        if (kv.second.isBuy != isBuy) continue;
-        kv.second.share = preLive;
+    // 1. Pre-extend snapshot of any IMPORTED_ same-asset same-side.
+    //    [OPM-733] Only on the sole->multi transition: once another tradeID
+    //    already tracks part of the position, live includes that sibling's
+    //    fill and snapshotting would absorb it into the IMPORTED_ share.
+    if (!hasOtherSameSideTracker(coin, isBuy)) {
+        auto livePosIt = currentPositions.find(coin);
+        double preLive = (livePosIt != currentPositions.end())
+            ? ((livePosIt->second.size > 0) ? livePosIt->second.size
+                                            : -livePosIt->second.size)
+            : 0.0;
+        for (auto& kv : importedTrades) {
+            if (strcmp(kv.second.coin, coin) != 0) continue;
+            if (kv.second.isBuy != isBuy) continue;
+            kv.second.share = preLive;
+        }
     }
 
     // 2. Register the new regular trade
@@ -129,12 +138,14 @@ void brokerBuy2Extend(const char* newOrderId, const char* coin, bool isBuy,
     strncpy_s(rt.coin, coin, sizeof(rt.coin) - 1);
     rt.isBuy = isBuy;
     rt.filledSize = size;
+    rt.closedSize = 0;
     regularTrades[newOrderId] = rt;
 
     // 3. Mirror into live (applyFill)
-    if (livePosIt != currentPositions.end()) {
-        if (isBuy) livePosIt->second.size += size;
-        else       livePosIt->second.size -= size;
+    auto posIt = currentPositions.find(coin);
+    if (posIt != currentPositions.end()) {
+        if (isBuy) posIt->second.size += size;
+        else       posIt->second.size -= size;
     } else {
         CurrentPosition np;
         np.size = isBuy ? size : -size;
@@ -159,6 +170,86 @@ void coverImportedTrade(const char* orderId, double closeAmount) {
         if (trade.isBuy) posIt->second.size -= closeAmount;
         else             posIt->second.size += closeAmount;
     }
+}
+
+// Simulates BrokerSell2 partially closing a REGULAR (mapped) trade: the
+// reduce-only close order fills and the live position shrinks. Mirrors
+// hl_broker_trade.cpp's per-trade close accounting for mapped trades.
+void coverRegularTrade(const char* orderId, double closeAmount) {
+    auto it = regularTrades.find(orderId);
+    if (it == regularTrades.end()) return;
+    RegularTrade& trade = it->second;
+
+    // [OPM-733] Mirrors recordZorroClose: mapped trades accumulate closes in
+    // closedSize (filledSize stays = entry order's cumulative fill, since
+    // WS/HTTP lookups re-derive it from the exchange).
+    trade.closedSize += closeAmount;
+
+    auto posIt = currentPositions.find(trade.coin);
+    if (posIt != currentPositions.end()) {
+        if (trade.isBuy) posIt->second.size -= closeAmount;
+        else             posIt->second.size += closeAmount;
+    }
+}
+
+// Implements BrokerTrade's generic return path for REGULAR (mapped) trades:
+// the value Zorro's automatic fill-poll writes into its ledger.
+// [OPM-733] Net open amount = entry fill minus Zorro-driven closes.
+double getRegularTradeSize(const char* orderId) {
+    auto it = regularTrades.find(orderId);
+    if (it == regularTrades.end()) return 0;
+    double net = it->second.filledSize - it->second.closedSize;
+    return (net > 0) ? net : 0;
+}
+
+// [OPM-733] Mirrors BrokerTrade's net-open LOT return (hl_broker_trade.cpp
+// generic path). Returns the integer lot count Zorro writes into its ledger.
+// A fully-closed mapped trade whose net is a tiny positive float residual
+// (filledSize re-derived from the exchange as e.g. 0.1+0.2 vs closedSize 0.3)
+// rounds to 0 lots but must NOT be floored up to a phantom 1-lot trade — that
+// fails reconcile, the very symptom OPM-733 exists to prevent.
+int getRegularTradeLots(const char* orderId, double lotSize) {
+    auto it = regularTrades.find(orderId);
+    if (it == regularTrades.end()) return 0;
+    double openSize = it->second.filledSize - it->second.closedSize;
+    double lotEps = (lotSize > 0) ? lotSize * 0.5 : 1e-9;
+    if (openSize < lotEps) openSize = 0;  // fully closed within sub-lot residual
+    if (openSize > 0) {
+        int fillLots = (lotSize > 0)
+            ? (int)(openSize / lotSize + 0.5)
+            : (int)(openSize + 0.5);
+        return (fillLots > 0) ? fillLots : 1;
+    }
+    return 0;
+}
+
+// Pre-fix buggy mirror: no sub-lot epsilon, legacy `:1` floor. A positive
+// float residual after a full close returns a phantom 1 lot.
+int getRegularTradeLots_PRE_OPM733_EPS(const char* orderId, double lotSize) {
+    auto it = regularTrades.find(orderId);
+    if (it == regularTrades.end()) return 0;
+    double openSize = it->second.filledSize - it->second.closedSize;
+    if (openSize < 0) openSize = 0;
+    if (openSize > 0) {
+        int fillLots = (lotSize > 0)
+            ? (int)(openSize / lotSize + 0.5)
+            : (int)(openSize + 0.5);
+        return (fillLots > 0) ? fillLots : 1;
+    }
+    return 0;
+}
+
+// Inject exact filled/closed values to model float residuals that arise when
+// filledSize is re-derived from the exchange (sum of fills) while closedSize
+// accumulates separately. [OPM-733 hardening]
+void setRegularRaw(const char* orderId, const char* coin, bool isBuy,
+                   double filledSize, double closedSize) {
+    RegularTrade rt;
+    strncpy_s(rt.coin, coin, sizeof(rt.coin) - 1);
+    rt.isBuy = isBuy;
+    rt.filledSize = filledSize;
+    rt.closedSize = closedSize;
+    regularTrades[orderId] = rt;
 }
 
 void reset() {
@@ -386,6 +477,99 @@ void test_OPM680_external_close_before_extend_captured_by_snapshot() {
 }
 
 //=============================================================================
+// OPM-733 SCENARIOS (BrokerTrade fill-poll corrupts Zorro ledger)
+//=============================================================================
+
+void test_OPM733_double_extend_keeps_imported_share() {
+    // OPM-733 incident 2 (ADA, YOLO V2 live log 2026-06-08): bootstrap import,
+    // then same-side EXTENDs on two consecutive daily rebalances. The 2nd
+    // extend's pre-extend snapshot ran while ALREADY in multi-tracker mode and
+    // absorbed extend #1's fill into the IMPORTED_ share (81910 -> 87741).
+    // Zorro's fill-poll then inflated its ledger by exactly 5831, failing the
+    // strategy reconcile ($985 > $500 HALT) on every subsequent rebalance.
+    // The snapshot must only run on the sole->multi transition.
+    TradeTracker::reset();
+    TradeTracker::importTrade("IMPORTED_S00002", "ADA", false, 81910.0, 0.222316);
+    TradeTracker::setCurrentPosition("ADA", -81910.0, 0.222316);
+
+    TradeTracker::brokerBuy2Extend("S00035", "ADA", false, 5831.0);   // live -87741
+    TradeTracker::brokerBuy2Extend("S00084", "ADA", false, 11556.0);  // live -99297
+
+    double importedShare = TradeTracker::getImportedTradeSize("IMPORTED_S00002");
+    ASSERT_FLOAT_EQ_TOL(importedShare, 81910.0, 1e-6);
+
+    // Ledger sum (imported share + both extends) must equal live aggregate
+    double ledgerSum = importedShare + 5831.0 + 11556.0;
+    ASSERT_FLOAT_EQ_TOL(ledgerSum, 99297.0, 1e-6);
+}
+
+void test_OPM733_triple_extend_keeps_imported_share() {
+    // Share must stay pinned across ANY number of subsequent extends.
+    TradeTracker::reset();
+    TradeTracker::importTrade("IMPORTED_S00002", "ADA", false, 81910.0, 0.222316);
+    TradeTracker::setCurrentPosition("ADA", -81910.0, 0.222316);
+
+    TradeTracker::brokerBuy2Extend("S00035", "ADA", false, 5831.0);
+    TradeTracker::brokerBuy2Extend("S00084", "ADA", false, 11556.0);
+    TradeTracker::brokerBuy2Extend("S00099", "ADA", false, 1000.0);
+
+    ASSERT_FLOAT_EQ_TOL(TradeTracker::getImportedTradeSize("IMPORTED_S00002"), 81910.0, 1e-6);
+}
+
+void test_OPM733_regular_partial_close_reports_net() {
+    // OPM-733 incident 1 (TRX, YOLO V2 live log 2026-06-01): a mapped trade
+    // (real oid) is partially closed via BrokerSell2 (61796 -> 58508 open).
+    // BrokerTrade's fill-poll then re-reported the entry order's gross fill
+    // (61796), and Zorro wrote it back into the ledger ("filled 61796 of
+    // 58508"). BrokerTrade must report the NET open amount: entry fill minus
+    // Zorro-driven closes.
+    TradeTracker::reset();
+    TradeTracker::brokerBuy2Extend("L00034", "TRX", true, 61796.0);  // live 61796
+
+    TradeTracker::coverRegularTrade("L00034", 3288.0);  // live 58508
+
+    ASSERT_FLOAT_EQ_TOL(TradeTracker::getRegularTradeSize("L00034"), 58508.0, 1e-6);
+}
+
+void test_OPM733_regular_full_close_reports_zero() {
+    // Fully Zorro-closed mapped trade must report 0, not the gross entry fill.
+    TradeTracker::reset();
+    TradeTracker::brokerBuy2Extend("L00034", "TRX", true, 61796.0);
+
+    TradeTracker::coverRegularTrade("L00034", 61796.0);  // live 0
+
+    ASSERT_FLOAT_EQ_TOL(TradeTracker::getRegularTradeSize("L00034"), 0.0, 1e-6);
+}
+
+void test_OPM733_full_close_sublot_residual_no_phantom_lot() {
+    // Pre-release review finding (2026-06-11): a mapped trade fully closed by
+    // Zorro can leave a tiny POSITIVE float residual when filledSize is
+    // re-derived from the exchange (0.1+0.2 = 0.30000000000000004) while
+    // closedSize accumulated to 0.3. net = +4.4e-17 rounds to 0 lots, but the
+    // legacy `:1` floor returned a phantom 1-lot trade -> reconcile mismatch,
+    // the exact OPM-733 symptom. The sub-lot epsilon must report 0.
+    TradeTracker::reset();
+    const double BTC_LOT = 0.0001;  // szDecimals=4
+    TradeTracker::setRegularRaw("L00034", "BTC", true, 0.1 + 0.2, 0.3);
+
+    // Legacy behavior returned a phantom 1 lot...
+    ASSERT_EQ(TradeTracker::getRegularTradeLots_PRE_OPM733_EPS("L00034", BTC_LOT), 1);
+    // ...the epsilon-guarded path reports fully closed (0 lots).
+    ASSERT_EQ(TradeTracker::getRegularTradeLots("L00034", BTC_LOT), 0);
+}
+
+void test_OPM733_genuine_sublot_position_still_reports_one_lot() {
+    // Guard the other direction: a genuine open position smaller than one lot
+    // but at least half a lot must still report 1 lot (not be swallowed by the
+    // epsilon). 0.00007 BTC > 0.5*lot(0.00005) -> 1 lot.
+    TradeTracker::reset();
+    const double BTC_LOT = 0.0001;
+    TradeTracker::setRegularRaw("L00040", "BTC", true, 0.00007, 0.0);
+
+    ASSERT_EQ(TradeTracker::getRegularTradeLots("L00040", BTC_LOT), 1);
+}
+
+//=============================================================================
 // MAIN
 //=============================================================================
 
@@ -412,6 +596,12 @@ int main() {
     RUN_TEST(OPM680_extend_then_cover_imported);
     RUN_TEST(OPM680_extend_then_full_cover_imported);
     RUN_TEST(OPM680_external_close_before_extend_captured_by_snapshot);
+    RUN_TEST(OPM733_double_extend_keeps_imported_share);
+    RUN_TEST(OPM733_triple_extend_keeps_imported_share);
+    RUN_TEST(OPM733_regular_partial_close_reports_net);
+    RUN_TEST(OPM733_regular_full_close_reports_zero);
+    RUN_TEST(OPM733_full_close_sublot_residual_no_phantom_lot);
+    RUN_TEST(OPM733_genuine_sublot_position_still_reports_one_lot);
 
     return printTestSummary();
 }

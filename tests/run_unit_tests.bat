@@ -8,6 +8,13 @@ REM
 REM Exit codes:
 REM   0 = All tests passed
 REM   1 = One or more tests failed
+REM
+REM [OPM-735] Each module runs via "cmd /c .\..." (NOT "call"): every
+REM compile_*.bat re-runs vcvars, and chained calls grow this process's
+REM environment until cmd aborts the batch SILENTLY with exit 0 (observed
+REM after 3 modules). A child cmd per module discards the vcvars growth.
+REM The ".\" prefix keeps resolution working when the CWD is excluded from
+REM the executable search path (NoDefaultCurrentDirectoryInExePath).
 REM =============================================================================
 
 setlocal EnableDelayedExpansion
@@ -29,7 +36,7 @@ REM Test 1: PIP/PIPCost/LotAmount Formulas
 REM Prevents bugs: 6dfb104, 213643c, 8303e8b
 REM =============================================================================
 echo [1/21] Testing PIP/PIPCost/LotAmount formulas...
-call compile_broker_asset_test.bat
+cmd /c .\compile_broker_asset_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -44,7 +51,7 @@ REM Test 2: Multi-Asset Position Parsing
 REM Prevents bug: 81db4b6
 REM =============================================================================
 echo [2/21] Testing multi-asset position parsing...
-call compile_position_parsing_test.bat
+cmd /c .\compile_position_parsing_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -59,7 +66,7 @@ REM Test 3: IMPORTED Trade Position Tracking
 REM Prevents bug: 18c287c
 REM =============================================================================
 echo [3/21] Testing IMPORTED trade position tracking...
-call compile_imported_test.bat
+cmd /c .\compile_imported_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -74,7 +81,7 @@ REM Test 4: EIP-712 Mainnet vs Testnet Source
 REM Prevents bug: OPM-22 (e392a43)
 REM =============================================================================
 echo [4/21] Testing EIP-712 mainnet vs testnet source...
-call compile_eip712_source_test.bat
+cmd /c .\compile_eip712_source_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -89,7 +96,7 @@ REM Test 5: Existing utils tests (if they exist)
 REM =============================================================================
 echo [5/21] Testing utility functions...
 if exist compile_utils_test.bat (
-    call compile_utils_test.bat >nul 2>&1
+    cmd /c .\compile_utils_test.bat >nul 2>&1
     if !ERRORLEVEL! EQU 0 (
         set /a TESTS_PASSED+=1
         echo       PASSED
@@ -107,7 +114,7 @@ REM Test 6: GET_PRICE Context Isolation [OPM-6]
 REM Prevents bug: OPM-6 (GET_PRICE returns wrong asset's price)
 REM =============================================================================
 echo [6/21] Testing GET_PRICE context isolation...
-call compile_get_price_context_test.bat
+cmd /c .\compile_get_price_context_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -122,7 +129,7 @@ REM Test 7: Trigger Order Construction [OPM-77]
 REM Prevents bug: Silent STOP flag discard, incorrect trigger JSON
 REM =============================================================================
 echo [7/21] Testing trigger order construction...
-call compile_trigger_order_test.bat
+cmd /c .\compile_trigger_order_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -137,7 +144,7 @@ REM Test 8: Partial Fill Detection [OPM-91]
 REM Prevents bug: Missing PartialFill status, HTTP fallback guard
 REM =============================================================================
 echo [8/21] Testing partial fill detection...
-call compile_partial_fill_test.bat
+cmd /c .\compile_partial_fill_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -152,7 +159,7 @@ REM Test 9: lotSize Division-by-Zero Guard [OPM-158]
 REM Prevents bug: Division by zero when lotSize is 0 (uninitialized state)
 REM =============================================================================
 echo [9/21] Testing lotSize division-by-zero guard...
-call compile_lotsize_divzero_test.bat
+cmd /c .\compile_lotsize_divzero_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -167,7 +174,7 @@ REM Test 10: WebSocket Parser Unit Tests [OPM-10]
 REM Tests all 6 ws_parsers.cpp functions with canned JSON fixtures
 REM =============================================================================
 echo [10/21] Testing WebSocket parsers...
-call compile_ws_parsers_test.bat
+cmd /c .\compile_ws_parsers_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -182,7 +189,7 @@ REM Test 11: TWAP Order Construction [OPM-81]
 REM Prevents: Incorrect msgpack field ordering, wrong TWAP action types
 REM =============================================================================
 echo [11/21] Testing TWAP order construction...
-call compile_twap_test.bat
+cmd /c .\compile_twap_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -197,7 +204,7 @@ REM Test 12: scheduleCancel (Dead Man's Switch) [OPM-83]
 REM Prevents: Incorrect msgpack encoding, signature mismatch
 REM =============================================================================
 echo [12/21] Testing scheduleCancel signing...
-call compile_schedule_cancel_test.bat
+cmd /c .\compile_schedule_cancel_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -212,7 +219,7 @@ REM Test 13: batchModify (Atomic Order Modify) [OPM-80]
 REM Prevents: Incorrect msgpack encoding, wrong oid type, field ordering
 REM =============================================================================
 echo [13/21] Testing batchModify encoding...
-call compile_batch_modify_test.bat
+cmd /c .\compile_batch_modify_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -227,7 +234,7 @@ REM Test 14: Bracket Order Encoding [OPM-79]
 REM Prevents: Wrong grouping, missing orders, incorrect trigger fields
 REM =============================================================================
 echo [14/21] Testing bracket order encoding...
-call compile_bracket_order_test.bat
+cmd /c .\compile_bracket_order_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -242,7 +249,7 @@ REM Test 15: Trading Service [OPM-9]
 REM Tests: CLOID gen/parse, trade ID, nonce, order storage, fill status
 REM =============================================================================
 echo [15/21] Testing trading service logic...
-call compile_trading_service_test.bat
+cmd /c .\compile_trading_service_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -257,7 +264,7 @@ REM Test 16: Account Service [OPM-9]
 REM Tests: PositionInfo, Balance, applyFill, Zorro account values
 REM =============================================================================
 echo [16/21] Testing account service logic...
-call compile_account_service_test.bat
+cmd /c .\compile_account_service_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -272,7 +279,7 @@ REM Test 17: Market Service [OPM-9]
 REM Tests: Candle intervals, HTTP seed cooldown
 REM =============================================================================
 echo [17/21] Testing market service logic...
-call compile_market_service_test.bat
+cmd /c .\compile_market_service_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -287,7 +294,7 @@ REM Test 18: Market Service HTTP Parsing [OPM-174]
 REM Tests: l2Book, candleSnapshot, metaAndAssetCtxs parsing
 REM =============================================================================
 echo [18/21] Testing market service HTTP parsing...
-call compile_market_service_http_test.bat
+cmd /c .\compile_market_service_http_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -302,7 +309,7 @@ REM Test 19: Account Service HTTP Parsing [OPM-174]
 REM Tests: spotBalance, userRole, orderStatus parsing
 REM =============================================================================
 echo [19/21] Testing account service HTTP parsing...
-call compile_account_service_http_test.bat
+cmd /c .\compile_account_service_http_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -317,7 +324,7 @@ REM Test 20: Account Service WS Cache Tests [OPM-175]
 REM Tests: getBalance, hasRealtimeBalance, getPosition with PriceCache
 REM =============================================================================
 echo [20/21] Testing account service WS cache interactions...
-call compile_account_service_ws_test.bat
+cmd /c .\compile_account_service_ws_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED
@@ -332,7 +339,7 @@ REM Test 21: Market Service WS Cache Tests [OPM-175]
 REM Tests: getPrice WS reads, stale-data fallback, HTTP seed cooldown
 REM =============================================================================
 echo [21/21] Testing market service WS cache interactions...
-call compile_market_service_ws_test.bat
+cmd /c .\compile_market_service_ws_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1
     echo       PASSED

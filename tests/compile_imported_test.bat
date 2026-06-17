@@ -27,7 +27,7 @@ if errorlevel 1 (
 echo.
 echo Running tests...
 echo.
-test_imported_trades.exe
+.\test_imported_trades.exe
 set TEST_RESULT=%ERRORLEVEL%
 
 echo.
