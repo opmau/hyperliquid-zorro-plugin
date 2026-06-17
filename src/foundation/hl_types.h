@@ -69,7 +69,10 @@ struct OrderState {
     char coin[32] = {0};
     OrderSide side = OrderSide::Buy;
     double requestedSize = 0.0;
-    double filledSize = 0.0;
+    double filledSize = 0.0;    // Entry order's cumulative fill (mapped trades);
+                                // IMPORTED_ trades: this tradeID's position share
+    double closedSize = 0.0;    // [OPM-733] Zorro-driven closes (mapped trades only);
+                                // BrokerTrade reports filledSize - closedSize
     double avgPrice = 0.0;
     OrderStatus status = OrderStatus::Pending;
     int zorroTradeId = 0;
