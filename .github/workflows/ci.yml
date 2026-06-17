@@ -20,7 +20,11 @@ concurrency:
 
 jobs:
   build-and-test:
-    runs-on: windows-latest
+    # Pinned to windows-2022 (Visual Studio 2022). windows-latest moved to the
+    # VS18 image, where the "Visual Studio 17 2022" CMake generator no longer
+    # resolves ("could not find any instance of Visual Studio"). Pin keeps the
+    # 32-bit VS2022 toolchain Zorro requires. Revisit when adding VS18 support.
+    runs-on: windows-2022
 
     # Disable vcpkg GHA binary caching (see release.yml for rationale).
     env:
