@@ -27,7 +27,7 @@ if errorlevel 1 (
 echo.
 echo Running tests...
 echo.
-test_broker_asset.exe
+.\test_broker_asset.exe
 set TEST_RESULT=%ERRORLEVEL%
 
 echo.

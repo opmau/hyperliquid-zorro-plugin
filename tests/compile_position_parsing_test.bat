@@ -27,7 +27,7 @@ if errorlevel 1 (
 echo.
 echo Running tests...
 echo.
-test_position_parsing.exe
+.\test_position_parsing.exe
 set TEST_RESULT=%ERRORLEVEL%
 
 echo.

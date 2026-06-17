@@ -46,7 +46,7 @@ echo.
 
 echo Running test...
 echo.
-test_ws_parsers.exe
+.\test_ws_parsers.exe
 set TEST_RESULT=%ERRORLEVEL%
 
 echo.

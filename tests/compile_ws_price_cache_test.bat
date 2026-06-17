@@ -42,7 +42,7 @@ echo.
 
 echo Running test...
 echo.
-test_ws_price_cache.exe
+.\test_ws_price_cache.exe
 
 if errorlevel 1 (
     echo.
