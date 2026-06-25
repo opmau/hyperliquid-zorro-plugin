@@ -18,6 +18,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege GITHUB_TOKEN. CI only checks out, builds, and tests — it
+# publishes nothing, so read-only access to the repo contents is sufficient.
+# (release.yml sets contents: write because it creates the GitHub Release.)
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     # Pinned to windows-2022 (Visual Studio 2022). windows-latest moved to the
