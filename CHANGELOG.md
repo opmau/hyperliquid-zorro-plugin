@@ -11,6 +11,137 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-07-27
+
+Makes ALO (post-only / add-liquidity-only) execution actually reachable from a
+Zorro strategy. **No ALO order had ever reached the exchange from this stack**:
+all 148 live orders in the reference strategy's log went out `"tif":"Ioc"`
+despite the script calling `brokerCommand(50012, "Alo")` since February. This
+release fixes that and the surrounding defects that made resting orders unsafe
+to use for closes, repricing, and error handling.
+
+Also documents ALO, modify, TWAP and bracket support, which shipped
+undocumented before 2.0.0.
+
+### Fixed
+
+- **`brokerCommand(50012, "Alo")` was silently reverted before every order**
+  ([OPM-791]). Zorro auto-calls `SET_ORDERTYPE` at each order entry and can
+  only derive types 0–3 from `TradeMode`, so the handler overwrote the
+  script's ALO choice with `"Ioc"` microseconds before the order was built —
+  and `case 4` ("Alo") was unreachable in live trading. `50012("Alo")` now
+  sets a **sticky** override that the auto-call does not downgrade; it is
+  released by `50012("Ioc")`/`50012("Gtc")`, at login and at logout.
+  `brokerCommand(157, 4)` is treated as the same explicit intent.
+- **Market orders inherited the global `"Alo"` TIF** ([OPM-794]). The order
+  builder's TIF switch fell through to the global order-type string, so a
+  market order — which the plugin deliberately downgrades to IOC at a
+  *crossing* price (ask × 1.05) — still went out `tif:"Alo"`: a guaranteed
+  post-only reject, surfaced only as `BrokerBuy2 → 0`. The request enum is now
+  the sole source of truth for the wire TIF.
+- **`50012` stored the caller's casing verbatim** ([OPM-794]). Only the
+  msgpack signing path canonicalized, so `50012("ioc")` signed `"Ioc"` but
+  serialized `"ioc"` — a hash mismatch Hyperliquid reports as
+  *"User or API Wallet does not exist"* (the OPM-677 failure class). TIF
+  strings are now canonicalized on ingestion and in `setOrderType()`.
+- **Exchange order rejects were invisible to scripts** ([OPM-795]).
+  Hyperliquid returns per-order errors in `statuses[i].error` under a
+  **top-level `status:"ok"`**, which neither the error branch nor the status
+  parser read; every reject collapsed into "No order ID in exchange response".
+  The reject text is now parsed, logged as `Order REJECTED: <text>`, stored on
+  the order state, and exposed via the new **`50023`** command so a strategy
+  can tell "post-only would cross → reprice one tick back" from
+  "margin/signing failure → stop trading this asset".
+- **`BrokerSell2` reported an unfilled resting close as fully closed**
+  ([OPM-792]). A resting (ALO/GTC) close returns `filledSize = 0`, and the old
+  code then reported `abs(amount)` — a full close — through five channels,
+  mutating the position cache and the Zorro-close ledger along the way. Zorro
+  wrote the position off its books while the contracts were still on the
+  exchange. It now reports only what actually filled, and moves no cache or
+  ledger state until a fill is confirmed.
+- **A resting close order was uncancellable from script** ([OPM-792]).
+  `BrokerSell2` placed the close through a fresh internal trade ID it never
+  returned, so `DO_CANCEL` targeted the already-filled *entry* oid. The close
+  order is now linked to the position; `DO_CANCEL(tradeId)` cancels the
+  working close order while one exists, and the link clears once it fills.
+- **Prices were rounded symmetrically, across the spread** ([OPM-796]).
+  A passive buy limit at the bid could round *up* through the spread (and a
+  sell limit *down*), producing post-only rejects that looked random.
+  Rounding is now side-aware: buys floor, sells ceil.
+- **Hyperliquid's integer-price exemption was not implemented** ([OPM-796]).
+  Prices were snapped to a 5-significant-figure grid, so above $100k every
+  $1 level on BTC collapsed onto a $10 grid and `123456` became `123460` —
+  even though HL accepts every integer price regardless of significant
+  figures. $1-level maker quotes on BTC are now expressible.
+- **A partially-filled-then-cancelled order lost its partial** ([OPM-798]).
+  `BrokerTrade` checked "cancelled" before "anything still open" and returned
+  `NAY-1`, telling Zorro the order never existed — so it discarded contracts
+  the exchange still held. The HTTP reconciliation path also zeroed
+  `filledSize` on cancel. Both now preserve the partial; only a cancel with
+  nothing filled is `NAY-1`.
+- **Login left two order-type sources of truth disagreeing** ([OPM-798]).
+  `BrokerLogin` set `g_config.orderType = "Gtc"` without calling
+  `trading::setOrderType()`, whose static stayed `"Ioc"`. Both are now set to
+  `"Ioc"` — the value Zorro's auto `SET_ORDERTYPE(0)` picks anyway.
+- **`50020` (open-order count) matched symbols unnormalized and had no HTTP
+  fallback** ([OPM-798]). PerpDex symbols never matched the cache key, and a
+  genuinely resting order reported 0 whenever the WebSocket cache was empty.
+  Symbols are now normalized the same way `SET_SYMBOL` does, with an
+  authoritative HTTP fallback.
+- **Cancels built from synthetic trade IDs submitted a cancel for oid 0**
+  ([OPM-797]). `PENDING_…`, `RESUMED_…`, `IMPORTED_…` and `DRY_RUN` all
+  become 0 through `_atoi64`, and the resulting well-formed cancel reported
+  success. These are now rejected with a clear log line.
+
+### Added
+
+- **`50044 HL_MODIFY_BY_TRADEID`** — scalar C-ABI reprice reachable from
+  Lite-C ([OPM-793]). `batchModify` has been fully implemented and
+  queue-priority preserving since OPM-80, but its only entry point (`50042`)
+  takes a `ModifyRequest` containing `std::string` members, which Lite-C
+  cannot construct — so no script had ever called it. The new command takes
+  `double[3] = {tradeId, newPrice, newSize}` (size ≤ 0 keeps the current
+  size) and resolves coin/side/oid from the tracked order. Returns `1` on
+  success, `0` on rejection, `-1` for an unknown trade and `-2` when the order
+  already filled or was cancelled, so a reprice loop can tell a lost race from
+  a real failure. Replaces cancel → settle-poll → re-place: one round trip
+  instead of two, with no fill-race window.
+- **`50023 HL_GET_LAST_ORDER_ERROR`** — returns the class of the most recent
+  order reject (`0` none, `1` post-only-would-match, `2` margin, `3` other).
+  Pass a `char` buffer of at least 256 bytes as the parameter to also receive
+  the exchange's verbatim text.
+- **`DO_CANCEL(0)`** now cancels every resting order for the current
+  `SET_SYMBOL`, or account-wide when no symbol is selected ([OPM-797]).
+  Previously an explicit "not implemented". Orders are sourced from the
+  exchange rather than the local trade map, so an order left behind by a
+  crashed session is reachable after a Zorro restart — that case previously
+  required manual intervention in the Hyperliquid web UI.
+- The modify path now adopts the post-modify oid returned by the exchange, so
+  a reprice loop cannot leave the trade map pointing at a retired oid.
+
+### Documentation
+
+- Recorded that the plugin **ignores `SET_WAIT`**: `BrokerBuy2` never blocks or
+  polls and returns immediately on a "resting" response with fill = 0. The
+  Zorro manual's blocking convention does not apply — strategies must poll
+  `GET_POSITION` for fills ([OPM-798]).
+- Documented ALO, modify, TWAP and bracket support, which shipped before
+  2.0.0 without appearing in this file.
+
+### Tests / Infrastructure
+
+- New `test_alo_enablement` module: 49 regression tests covering all eight
+  changes, run as step 22 of `run_unit_tests.bat`. The rounding, TIF
+  canonicalization, error-classification and response-parsing tests exercise
+  the real implementations rather than simulations.
+- Split four files that had grown past the repo's size limits, with no
+  behaviour change: `hl_broker_trade.cpp` → `+ hl_broker_trade_query.cpp`
+  (execution vs. status query), `hl_broker_commands.cpp` →
+  `+ hl_broker_commands_hl.cpp` (standard Zorro modes vs. the 500xx range),
+  and extracted `hl_trading_response.*` (shared exchange-response parsing and
+  reject tracking) and `hl_trading_openorders.*` (exchange-sourced resting
+  order queries).
+
 ## [2.0.7] — 2026-06-17
 
 Fixes a position-tracking defect that corrupted Zorro's trade ledger and
@@ -234,7 +365,9 @@ First production release of the refactored plugin.
 
 ---
 
-[Unreleased]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.0.6...HEAD
+[Unreleased]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.0.7...v2.1.0
+[2.0.7]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.0.6...v2.0.7
 [2.0.6]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.0.5...v2.0.6
 [2.0.5]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.0.4...v2.0.5
 [2.0.4]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.0.3...v2.0.4

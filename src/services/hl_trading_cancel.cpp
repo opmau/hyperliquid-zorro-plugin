@@ -11,6 +11,7 @@
 //=============================================================================
 
 #include "hl_trading_service.h"
+#include "hl_trading_openorders.h"
 #include "hl_meta.h"
 #include "../foundation/hl_globals.h"
 #include "../foundation/hl_utils.h"
@@ -247,6 +248,13 @@ CloidQueryResult queryOrderByCloid(const char* cloid) {
 bool cancelOrder(const char* coin, const char* oid) {
     if (!coin || !oid) return false;
 
+    // [OPM-797] Guard synthetic tradeMap IDs (PENDING_/RESUMED_/IMPORTED_).
+    if (!utils::isExchangeOrderId(oid)) {
+        g_logger.logf(1, "cancelOrder: refusing to cancel non-exchange order id "
+                         "'%s' on %s — nothing was placed under it", oid, coin);
+        return false;
+    }
+
     if (g_config.diagLevel >= 1) {
         char msg[128];
         sprintf_s(msg, "Cancel request: %s oid=%s", coin, oid);
@@ -362,6 +370,41 @@ bool cancelOrderByTradeId(int tradeId) {
     OrderState state;
     if (!getOrder(tradeId, state)) return false;
 
+    // [OPM-792] When BrokerSell2 left a close order working against this
+    // position, that is the order the script means to cancel — the entry order
+    // has already filled, and cancelling its oid is a no-op at best.
+    if (state.closeTradeId > 0) {
+        OrderState closeState;
+        if (getOrder(state.closeTradeId, closeState)
+            && closeState.status != OrderStatus::Filled
+            && closeState.status != OrderStatus::Cancelled) {
+
+            bool ok = cancelOrder(closeState.coin, closeState.orderId);
+            g_logger.logf(1, "cancelOrderByTradeId: trade %d -> cancelling its "
+                             "resting CLOSE order %d (oid=%s): %s",
+                          tradeId, state.closeTradeId, closeState.orderId,
+                          ok ? "OK" : "FAILED");
+            if (ok) {
+                updateOrder(state.closeTradeId, closeState.filledSize,
+                            closeState.avgPrice, OrderStatus::Cancelled);
+                // Position is intact again — unlink so a later DO_CANCEL falls
+                // through to the entry order.
+                OrderState parent;
+                if (getOrder(tradeId, parent)) {
+                    parent.closeTradeId = 0;
+                    storeOrder(tradeId, parent);
+                }
+            }
+            return ok;
+        }
+        // Close order already resolved — drop the stale link and continue.
+        OrderState parent;
+        if (getOrder(tradeId, parent)) {
+            parent.closeTradeId = 0;
+            storeOrder(tradeId, parent);
+        }
+    }
+
     bool success = cancelOrder(state.coin, state.orderId);
     if (success) {
         OrderState current;
@@ -373,13 +416,56 @@ bool cancelOrderByTradeId(int tradeId) {
     return success;
 }
 
+// =============================================================================
+// CANCEL ALL [OPM-797]
+// =============================================================================
+// Sourced from the exchange's openOrders info endpoint rather than the local
+// tradeMap: after a Zorro restart the tradeMap is empty, and an order left
+// resting by the crashed session was previously only cancellable through the
+// Hyperliquid web UI.
+//
+// Each cancel is submitted individually. packCancelAction() encodes exactly one
+// {asset, oid} pair, so batching would mean a new msgpack/EIP-712 shape and a
+// new signing path; cancel-all is a rare, latency-insensitive safety operation,
+// so N round trips is the right trade for not touching the signing code.
+
 int cancelAllOrders(const char* coin) {
     if (g_config.diagLevel >= 1) {
         char msg[128];
         sprintf_s(msg, "Cancel all orders: coin=%s", coin ? coin : "(all)");
         logMsg(1, "cancelAllOrders", msg);
     }
-    return 0;
+
+    std::vector<OpenOrderInfo> orders = fetchOpenOrders();
+    if (orders.empty()) {
+        logMsg(1, "cancelAllOrders", "No open orders on exchange");
+        return 0;
+    }
+
+    int cancelled = 0, failed = 0, skipped = 0;
+    for (const auto& o : orders) {
+        if (coin && *coin && !utils::coinMatches(o.coin.c_str(), coin)) {
+            skipped++;
+            continue;
+        }
+        if (cancelOrder(o.coin.c_str(), o.oid.c_str())) {
+            cancelled++;
+            // Keep the tradeMap consistent when we happen to track this order.
+            int tid = findTradeIdByOid(o.oid.c_str());
+            if (tid > 0) {
+                OrderState st;
+                if (getOrder(tid, st) && st.status != OrderStatus::Filled) {
+                    updateOrder(tid, st.filledSize, st.avgPrice, OrderStatus::Cancelled);
+                }
+            }
+        } else {
+            failed++;
+        }
+    }
+
+    g_logger.logf(1, "cancelAllOrders(%s): %d cancelled, %d failed, %d other symbols",
+                  coin && *coin ? coin : "ALL", cancelled, failed, skipped);
+    return cancelled;
 }
 
 // =============================================================================

@@ -9,6 +9,7 @@
 
 #include "hl_trading_modify.h"
 #include "hl_trading_service.h"
+#include "hl_trading_response.h"
 #include "hl_meta.h"
 #include "../foundation/hl_globals.h"
 #include "../foundation/hl_utils.h"
@@ -19,6 +20,8 @@
 #include "../transport/json_helpers.h"
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
+#include <ctime>
 
 namespace hl {
 namespace trading {
@@ -85,10 +88,15 @@ ModifyResult modifyOrder(const ModifyRequest& request) {
     }
 
     // === Format price/size per Hyperliquid rules ===
+    // [OPM-796] Side-aware, same as placeOrder: a reprice must not round the
+    // new passive quote across the spread.
     const AssetInfo* assetInfo = g_assets.getByIndex(assetIndex);
+    utils::PriceRound roundMode = (request.side == OrderSide::Buy)
+        ? utils::PriceRound::Down : utils::PriceRound::Up;
     std::string priceStr, sizeStr;
     if (assetInfo) {
-        priceStr = utils::formatPriceForExchange(request.limitPrice, assetInfo->szDecimals);
+        priceStr = utils::formatPriceForExchange(request.limitPrice,
+                                                 assetInfo->szDecimals, 6, roundMode);
         sizeStr = utils::formatSize(request.size, assetInfo->szDecimals);
     } else {
         priceStr = eip712::formatNumber(request.limitPrice);
@@ -224,34 +232,121 @@ ModifyResult modifyOrder(const ModifyRequest& request) {
         logMsg(2, "modifyOrder", msg);
     }
 
-    yyjson_doc* doc = yyjson_read(resp.body.c_str(), resp.body.size(), 0);
-    if (!doc) {
+    OrderResponseStatus st;
+    if (!parseOrderStatusResponse(resp.body.c_str(), resp.body.size(), st) || !st.valid) {
         result.error = "Failed to parse exchange response JSON";
         logMsg(1, "modifyOrder", result.error.c_str());
         return result;
     }
-    yyjson_val* root = yyjson_doc_get_root(doc);
 
-    const char* statusVal = json::getStringPtr(root, "status");
-    if (statusVal && strncmp(statusVal, "err", 3) == 0) {
-        yyjson_val* respVal = yyjson_obj_get(root, "response");
-        char errMsg[512];
-        if (respVal && yyjson_is_str(respVal)) {
-            sprintf_s(errMsg, "Exchange error: %s", yyjson_get_str(respVal));
-        } else {
-            sprintf_s(errMsg, "Exchange rejected modify (no detail)");
-        }
-        result.error = errMsg;
-        logMsg(1, "modifyOrder", errMsg);
-        yyjson_doc_free(doc);
+    // [OPM-795] batchModify reports per-order rejects the same way `order`
+    // does — inside statuses[0].error under a top-level status:"ok".
+    if (!st.error.empty()) {
+        result.error = st.error;
+        setLastOrderError(st.error.c_str());
+        g_logger.logf(1, "Modify REJECTED: %s", st.error.c_str());
         return result;
     }
 
-    yyjson_doc_free(doc);
-
+    // [OPM-793] Adopt whatever the exchange now considers this order.
+    result.oid = st.oid;
+    result.filledSize = st.filledSize;
+    result.avgPrice = st.avgPrice;
     result.success = true;
-    logMsg(1, "modifyOrder", "Modify submitted successfully");
+    clearLastOrderError();
+
+    if (st.filled) {
+        g_logger.logf(1, "modifyOrder: modified order FILLED oid=%s sz=%.6f @ %.6f",
+                      st.oid, st.filledSize, st.avgPrice);
+    } else {
+        g_logger.logf(1, "modifyOrder: modify accepted (oid=%s)",
+                      st.oid[0] ? st.oid : "unchanged");
+    }
     return result;
+}
+
+// =============================================================================
+// SCRIPT-REACHABLE REPRICE [OPM-793]
+// =============================================================================
+
+int modifyByTradeId(int tradeId, double newPrice, double newSize) {
+    if (tradeId <= 0 || newPrice <= 0) {
+        g_logger.logf(1, "modifyByTradeId: bad args (tradeId=%d price=%.6f)",
+                      tradeId, newPrice);
+        return MODIFY_FAILED;
+    }
+
+    OrderState state;
+    if (!getOrder(tradeId, state)) {
+        g_logger.logf(1, "modifyByTradeId: trade %d not tracked", tradeId);
+        return MODIFY_UNKNOWN_TRADE;
+    }
+
+    // [OPM-792] A position with a resting close order reprices THAT order —
+    // the entry has already filled. Mirrors cancelOrderByTradeId.
+    int targetTradeId = tradeId;
+    if (state.closeTradeId > 0) {
+        OrderState closeState;
+        if (getOrder(state.closeTradeId, closeState)
+            && closeState.status != OrderStatus::Filled
+            && closeState.status != OrderStatus::Cancelled) {
+            targetTradeId = state.closeTradeId;
+            state = closeState;
+        }
+    }
+
+    // Only a working order can be moved. Racing a fill is the expected failure
+    // here, and the caller needs to tell it apart from a rejected modify.
+    if (state.status == OrderStatus::Filled || state.status == OrderStatus::Cancelled) {
+        g_logger.logf(1, "modifyByTradeId: trade %d is %s — nothing to modify",
+                      targetTradeId,
+                      state.status == OrderStatus::Filled ? "FILLED" : "CANCELLED");
+        return MODIFY_NOT_RESTING;
+    }
+
+    uint64_t oid = (uint64_t)_atoi64(state.orderId);
+    if (oid == 0) {
+        g_logger.logf(1, "modifyByTradeId: trade %d has no exchange oid ('%s')",
+                      targetTradeId, state.orderId);
+        return MODIFY_NOT_RESTING;
+    }
+
+    ModifyRequest req;
+    req.oid = oid;
+    req.useCloid = false;
+    req.coin = state.coin;
+    req.side = state.side;
+    req.size = (newSize > 0) ? newSize : state.requestedSize;
+    req.limitPrice = newPrice;
+    req.reduceOnly = (targetTradeId != tradeId);  // close orders are reduce-only
+    req.orderType = OrderType::Alo;               // reprice = passive requote
+
+    ModifyResult res = modifyOrder(req);
+    if (!res.success) {
+        g_logger.logf(1, "modifyByTradeId: trade %d modify failed — %s",
+                      targetTradeId, res.error.c_str());
+        return MODIFY_FAILED;
+    }
+
+    // Adopt the post-modify identity so the next cancel/reprice targets the
+    // live order rather than an oid the exchange has already retired.
+    OrderState updated = state;
+    updated.requestedSize = req.size;
+    if (!res.oid.empty()) strncpy_s(updated.orderId, res.oid.c_str(), _TRUNCATE);
+    if (res.filledSize > 0) {
+        updated.filledSize = res.filledSize;
+        updated.avgPrice = res.avgPrice;
+        updated.status = determineFilledStatus(res.filledSize, req.size);
+    } else {
+        updated.avgPrice = newPrice;
+        updated.status = OrderStatus::Open;
+    }
+    updated.lastUpdate = (double)time(nullptr) / 86400.0 + 25569.0;
+    storeOrder(targetTradeId, updated);
+
+    g_logger.logf(1, "modifyByTradeId: trade %d repriced to %.6f (size %.6f, oid=%s)",
+                  targetTradeId, newPrice, req.size, updated.orderId);
+    return MODIFY_OK;
 }
 
 } // namespace trading

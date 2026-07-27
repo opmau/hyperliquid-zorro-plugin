@@ -14,6 +14,7 @@
 //=============================================================================
 
 #include "hl_trading_service.h"
+#include "hl_trading_response.h"
 #include "hl_meta.h"
 #include "../foundation/hl_globals.h"
 #include "../foundation/hl_utils.h"
@@ -155,8 +156,12 @@ void removeOrder(int tradeId) {
 // =============================================================================
 
 void setOrderType(const char* orderType) {
-    if (orderType) {
-        strncpy_s(s_orderType, orderType, _TRUNCATE);
+    // [OPM-794] Store canonical casing. The signing path normalizes but the
+    // JSON path does not, so "ioc" here would sign as "Ioc" and serialize as
+    // "ioc" — a hash mismatch HL reports as "User or API Wallet does not exist".
+    const char* canonical = utils::canonicalTif(orderType);
+    if (canonical) {
+        strncpy_s(s_orderType, canonical, _TRUNCATE);
     }
 }
 
@@ -287,8 +292,15 @@ OrderResult placeOrderWithId(const OrderRequest& request, int tradeId) {
     orderAction.isBuy = (request.side == OrderSide::Buy);
 
     // Round price per Hyperliquid rules: 5 sig figs + max decimal places [OPM-76]
+    // [OPM-796] Side-aware: never round a buy limit UP or a sell limit DOWN.
+    // Symmetric rounding could push a passive quote across the spread, which
+    // the exchange rejects as post-only-would-match — a self-inflicted reject
+    // that looks random from the strategy's side.
+    utils::PriceRound roundMode = (request.side == OrderSide::Buy)
+        ? utils::PriceRound::Down : utils::PriceRound::Up;
     if (assetInfo) {
-        orderAction.price = utils::formatPriceForExchange(request.limitPrice, assetInfo->szDecimals);
+        orderAction.price = utils::formatPriceForExchange(
+            request.limitPrice, assetInfo->szDecimals, 6, roundMode);
         orderAction.size = utils::formatSize(request.size, assetInfo->szDecimals);
     } else {
         orderAction.price = eip712::formatNumber(request.limitPrice);
@@ -303,16 +315,25 @@ OrderResult placeOrderWithId(const OrderRequest& request, int tradeId) {
         orderAction.isTrigger = true;
         orderAction.triggerIsMarket = request.triggerIsMarket;
         if (assetInfo) {
+            // Trigger price is a threshold, not a passive quote — round to
+            // nearest so the stop fires where the strategy asked.
             orderAction.triggerPx = utils::formatPriceForExchange(request.triggerPx, assetInfo->szDecimals);
         } else {
             orderAction.triggerPx = eip712::formatNumber(request.triggerPx);
         }
         orderAction.tpsl = (request.triggerType == TriggerType::SL) ? "sl" : "tp";
     } else {
+        // [OPM-794] The request enum is the ONLY source of truth for the wire
+        // TIF. This switch used to fall through to the global s_orderType,
+        // so a market order — which BrokerBuy2 explicitly downgrades to
+        // OrderType::Ioc at a deliberately-crossing price — still went out
+        // tif:"Alo" whenever a script had set ALO globally. That is a
+        // guaranteed post-only reject, surfaced only as BrokerBuy2 -> 0.
         switch (request.orderType) {
             case OrderType::Gtc: orderAction.orderType = "Gtc"; break;
             case OrderType::Alo: orderAction.orderType = "Alo"; break;
-            default: orderAction.orderType = s_orderType; break;
+            case OrderType::Ioc: orderAction.orderType = "Ioc"; break;
+            default:             orderAction.orderType = "Ioc"; break;
         }
     }
 
@@ -478,76 +499,45 @@ OrderResult placeOrderWithId(const OrderRequest& request, int tradeId) {
         logMsg(1, "placeOrder", msg);
     }
 
-    yyjson_doc* doc = yyjson_read(body, resp.body.size(), 0);
-    if (!doc) {
+    OrderResponseStatus st;
+    if (!parseOrderStatusResponse(body, resp.body.size(), st) || !st.valid) {
         result.error = "Failed to parse exchange response JSON";
+        setLastOrderError(result.error.c_str());
         logMsg(1, "placeOrder", result.error.c_str());
         return result;
     }
-    yyjson_val* root = yyjson_doc_get_root(doc);
 
-    const char* statusVal = json::getStringPtr(root, "status");
-    if (statusVal && strncmp(statusVal, "err", 3) == 0) {
-        yyjson_val* respVal = yyjson_obj_get(root, "response");
-        char errMsg[512];
-        if (respVal && yyjson_is_str(respVal)) {
-            sprintf_s(errMsg, "Exchange error: %s", yyjson_get_str(respVal));
-        } else {
-            sprintf_s(errMsg, "Exchange rejected order (no detail)");
+    // [OPM-795] Surface the actual reject reason. Both the top-level err and
+    // the per-order statuses[0].error land here; scripts read the class back
+    // via brokerCommand(HL_GET_LAST_ORDER_ERROR).
+    if (!st.error.empty()) {
+        result.error = st.error;
+        setLastOrderError(st.error.c_str());
+        g_logger.logf(1, "Order REJECTED: %s", st.error.c_str());
+
+        // Record it against the trade too, when a state already exists.
+        OrderState existing;
+        if (g_trading.getOrder(tradeId, existing)) {
+            strncpy_s(existing.lastError, st.error.c_str(), _TRUNCATE);
+            existing.status = OrderStatus::Error;
+            storeOrder(tradeId, existing);
         }
-        result.error = errMsg;
-        logMsg(1, "placeOrder", errMsg);
-        yyjson_doc_free(doc);
         return result;
     }
 
-    yyjson_val* response = json::getObject(root, "response");
-    yyjson_val* rdata = response ? json::getObject(response, "data") : nullptr;
-    yyjson_val* statuses = rdata ? json::getArray(rdata, "statuses") : nullptr;
-    yyjson_val* status0 = statuses ? yyjson_arr_get(statuses, 0) : nullptr;
-
-    bool isFilled = false, isResting = false;
-    char oid[64] = {0};
-    double filledSize = 0.0;
-    double fillPrice = request.limitPrice;
-
-    if (status0) {
-        yyjson_val* filledObj = json::getObject(status0, "filled");
-        yyjson_val* restingObj = json::getObject(status0, "resting");
-
-        if (filledObj) {
-            isFilled = true;
-            filledSize = json::getDouble(filledObj, "totalSz");
-            fillPrice = json::getDouble(filledObj, "avgPx");
-            yyjson_val* oidVal = yyjson_obj_get(filledObj, "oid");
-            if (oidVal) {
-                if (yyjson_is_str(oidVal))
-                    strncpy_s(oid, yyjson_get_str(oidVal), _TRUNCATE);
-                else if (yyjson_is_int(oidVal))
-                    sprintf_s(oid, "%lld", (long long)yyjson_get_sint(oidVal));
-                else if (yyjson_is_real(oidVal))
-                    sprintf_s(oid, "%.0f", yyjson_get_real(oidVal));
-            }
-        } else if (restingObj) {
-            isResting = true;
-            yyjson_val* oidVal = yyjson_obj_get(restingObj, "oid");
-            if (oidVal) {
-                if (yyjson_is_str(oidVal))
-                    strncpy_s(oid, yyjson_get_str(oidVal), _TRUNCATE);
-                else if (yyjson_is_int(oidVal))
-                    sprintf_s(oid, "%lld", (long long)yyjson_get_sint(oidVal));
-                else if (yyjson_is_real(oidVal))
-                    sprintf_s(oid, "%.0f", yyjson_get_real(oidVal));
-            }
-        }
-    }
-    yyjson_doc_free(doc);
+    bool isFilled = st.filled, isResting = st.resting;
+    const char* oid = st.oid;
+    double filledSize = st.filledSize;
+    double fillPrice = st.filled ? st.avgPrice : request.limitPrice;
 
     if (!*oid) {
         result.error = "No order ID in exchange response";
+        setLastOrderError(result.error.c_str());
         logMsg(1, "placeOrder", "No order ID in exchange response");
         return result;
     }
+
+    clearLastOrderError();
 
     // STEP 7: Store order state with confirmed OID + fill data
     OrderState state;

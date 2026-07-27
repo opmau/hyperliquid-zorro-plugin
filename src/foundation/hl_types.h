@@ -77,7 +77,11 @@ struct OrderState {
     OrderStatus status = OrderStatus::Pending;
     int zorroTradeId = 0;
     double lastUpdate = 0.0;    // DATE of last update
-    char lastError[256] = {0};
+    char lastError[256] = {0};  // [OPM-795] Exchange reject text for this order
+    int closeTradeId = 0;       // [OPM-792] Internal tradeId of the close order
+                                // placed by BrokerSell2, while it is still
+                                // resting. DO_CANCEL on this trade cancels that
+                                // order rather than the (filled) entry order.
 };
 
 // === Position Data ===
@@ -181,6 +185,12 @@ struct ModifyRequest {
 struct ModifyResult {
     bool success = false;
     std::string error;
+    // [OPM-793] batchModify may keep the original oid or issue a new one. The
+    // caller must adopt whatever comes back, or the tradeMap keeps pointing at
+    // an oid that no longer exists and the reprice loop leaks orders.
+    std::string oid;            // Resting oid after the modify (empty if filled)
+    double filledSize = 0.0;    // Non-zero when the modify crossed and filled
+    double avgPrice = 0.0;
 };
 
 // === TWAP Order Support [OPM-81] ===

@@ -258,7 +258,15 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
         hl::g_config.useWsOrders = true;
         hl::g_config.enableHttpSeed = true;
         hl::g_config.httpSeedCooldownMs = hl::config::HTTP_SEED_COOLDOWN_MS;
-        strcpy_s(hl::g_config.orderType, "Gtc");
+
+        // [OPM-798] Login used to set g_config.orderType="Gtc" while the
+        // trading service's own static stayed "Ioc" — two sources of truth
+        // disagreeing until the first SET_ORDERTYPE. Set both, to the value
+        // Zorro's auto SET_ORDERTYPE(0) will pick anyway.
+        // [OPM-791] A fresh session starts with no sticky ALO override.
+        strcpy_s(hl::g_config.orderType, "Ioc");
+        hl::trading::setOrderType("Ioc");
+        hl::g_config.orderTypeSticky = false;
 
         if (type && *type) {
             if (_stricmp(type, "Real") == 0) {
@@ -414,6 +422,13 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
         // ===== LOGOUT =====
         g_everReceivedAccountData = false;
         g_lastHttpFallbackTime = 0;
+
+        // [OPM-791] Release the sticky ALO override so the next session does
+        // not silently inherit a previous strategy's post-only mode.
+        hl::g_config.orderTypeSticky = false;
+        strcpy_s(hl::g_config.orderType, "Ioc");
+        hl::trading::setOrderType("Ioc");
+        hl::trading::clearLastOrderError();
 
         // [OPM-550] Flush async log queue BEFORE tearing down the WS manager
         // so any final messages reach Zorro while BrokerMessage is still valid.

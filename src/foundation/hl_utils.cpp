@@ -103,6 +103,52 @@ void stripApiCoinPrefix(const char* apiCoin, char* out, size_t outSize) {
     strncpy_s(out, outSize, src, _TRUNCATE);
 }
 
+const char* canonicalTif(const char* tif) {
+    if (!tif || !*tif) return nullptr;
+    if (_stricmp(tif, "Ioc") == 0) return "Ioc";
+    if (_stricmp(tif, "Gtc") == 0) return "Gtc";
+    if (_stricmp(tif, "Alo") == 0) return "Alo";
+    return nullptr;
+}
+
+bool isExchangeOrderId(const char* oid) {
+    if (!oid || !*oid) return false;
+    for (const char* p = oid; *p; ++p) {
+        if (*p < '0' || *p > '9') return false;
+    }
+    return _atoi64(oid) > 0;
+}
+
+// Split "xyz:BTC-USDC" into dex="xyz", base="BTC". Spot pairs ("PURR/USDC")
+// and index names ("@107") contain no dash and pass through untouched.
+static void splitCoinParts(const char* coin, std::string& dex, std::string& base) {
+    dex.clear();
+    base.clear();
+    if (!coin || !*coin) return;
+
+    const char* colon = strchr(coin, ':');
+    if (colon) {
+        dex.assign(coin, colon - coin);
+        base.assign(colon + 1);
+    } else {
+        base.assign(coin);
+    }
+
+    size_t dash = base.find('-');
+    if (dash != std::string::npos) base.erase(dash);
+}
+
+bool coinMatches(const char* exchangeCoin, const char* wanted) {
+    if (!exchangeCoin || !*exchangeCoin || !wanted || !*wanted) return false;
+
+    std::string exDex, exBase, wDex, wBase;
+    splitCoinParts(exchangeCoin, exDex, exBase);
+    splitCoinParts(wanted, wDex, wBase);
+
+    if (_stricmp(exDex.c_str(), wDex.c_str()) != 0) return false;
+    return _stricmp(exBase.c_str(), wBase.c_str()) == 0;
+}
+
 void toUpperCase(char* str) {
     if (!str) return;
     for (char* c = str; *c; ++c) {
@@ -158,7 +204,8 @@ double roundToTickSize(double price, double tickSize) {
     return round(price / tickSize) * tickSize;
 }
 
-double roundPriceForExchange(double price, int szDecimals, int maxDecimals) {
+double roundPriceForExchange(double price, int szDecimals, int maxDecimals,
+                             PriceRound mode) {
     if (price == 0.0) return 0.0;
 
     // Guard: reject non-finite values (NaN, infinity)
@@ -170,22 +217,45 @@ double roundPriceForExchange(double price, int szDecimals, int maxDecimals) {
     // Guard: reject prices beyond safe double precision for 5 sig-fig rounding
     if (price >= 1e15) return 0.0;
 
-    // Step 1: Round to 5 significant figures (matches Python f"{px:.5g}")
-    const int sigFigs = 5;
-    double magnitude = floor(log10(fabs(price)));
-    double factor = pow(10.0, sigFigs - 1 - magnitude);
-    double rounded = round(price * factor) / factor;
-
-    // Step 2: Round to max allowed decimal places (MAX_DECIMALS - szDecimals)
     int maxDecPlaces = maxDecimals - szDecimals;
     if (maxDecPlaces < 0) maxDecPlaces = 0;
-    rounded = roundToDecimals(rounded, maxDecPlaces);
 
-    return rounded;
+    // [OPM-796] Grid step = the coarser of the 5-sig-fig grid and the decimal
+    // limit, capped at 1 because HL always accepts integer prices. The cap is
+    // what makes 123456 pass through unchanged instead of snapping to 123460,
+    // and what lets BTC above $100k be quoted on the $1 grid rather than $10.
+    const int sigFigs = 5;
+    double magnitude = floor(log10(price));
+    double step = pow(10.0, magnitude - (sigFigs - 1));
+    double decimalStep = pow(10.0, -maxDecPlaces);
+    if (decimalStep > step) step = decimalStep;
+    if (step > 1.0) step = 1.0;
+
+    // Snap to the grid in the requested direction. Prices already on-grid must
+    // survive Down/Up untouched — 1234.6/0.1 evaluates to 12345.999999999998 in
+    // binary floating point, and a naive floor() would drop a full tick.
+    double q = price / step;
+    double qNearest = round(q);
+    double scale = (fabs(qNearest) > 1.0) ? fabs(qNearest) : 1.0;
+    if (fabs(q - qNearest) <= 1e-9 * scale) {
+        q = qNearest;                                  // already on-grid
+    } else if (mode == PriceRound::Down) {
+        q = floor(q);
+    } else if (mode == PriceRound::Up) {
+        q = ceil(q);
+    } else {
+        q = qNearest;
+    }
+
+    // Multiplying back reintroduces binary noise (e.g. 12346 * 0.1 =
+    // 1234.6000000000001); clamp to the decimal budget to keep the wire string
+    // canonical. Integer results are unaffected.
+    return roundToDecimals(q * step, maxDecPlaces);
 }
 
-std::string formatPriceForExchange(double price, int szDecimals, int maxDecimals) {
-    double rounded = roundPriceForExchange(price, szDecimals, maxDecimals);
+std::string formatPriceForExchange(double price, int szDecimals, int maxDecimals,
+                                   PriceRound mode) {
+    double rounded = roundPriceForExchange(price, szDecimals, maxDecimals, mode);
 
     // Format with the max allowed decimal places, then strip trailing zeros
     int maxDecPlaces = maxDecimals - szDecimals;
