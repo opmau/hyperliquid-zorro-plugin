@@ -1,5 +1,5 @@
 //=============================================================================
-// hl_broker_commands.cpp - BrokerCommand handler
+// hl_broker_commands.cpp - BrokerCommand handler (standard Zorro modes)
 //=============================================================================
 // Part of Hyperliquid Plugin for Zorro
 //
@@ -7,23 +7,17 @@
 // DEPENDENCIES: hl_broker_internal.h
 // THREAD SAFETY: Main thread only
 //
-// This module handles all BrokerCommand modes:
+// This module handles the BrokerCommand modes Zorro itself defines:
 // - GET_COMPLIANCE, GET_MAXREQUESTS, GET_MAXTICKS, GET_BROKERZONE
-// - SET_DIAGNOSTICS, SET_AMOUNT, SET_HWND
+// - SET_DIAGNOSTICS, SET_AMOUNT, SET_HWND, SET_ORDERTYPE, SET_SYMBOL
 // - GET_POSITION, GET_TRADES, GET_PRICE
 // - DO_CANCEL
-// - Export commands (50001-50003)
-// - Custom commands (50010-50031)
+//
+// The Hyperliquid-specific 500xx range lives in hl_broker_commands_hl.cpp and
+// is reached through this module's default branch.
 //=============================================================================
 
 #include "hl_broker_internal.h"
-#include "../services/hl_trading_twap.h"
-#include "../services/hl_trading_modify.h"
-#include "../services/hl_trading_bracket.h"
-
-//=============================================================================
-// HANDLER IMPLEMENTATION
-//=============================================================================
 
 double handleBrokerCommand(int mode, intptr_t parameter) {
     switch (mode) {
@@ -93,6 +87,28 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         // Store STOP flag for next BrokerBuy2 call
         hl::g_config.stopOrderPending = isStop;
 
+        // [OPM-791] Zorro auto-calls SET_ORDERTYPE at every order entry and can
+        // only derive 0/1/2/3 from TradeMode — it can never send 4 (ALO). So a
+        // script's brokerCommand(50012,"Alo") was reliably clobbered back to
+        // "Ioc" microseconds before the order was built. That is why all 148
+        // live orders in YOLO_HL_Native_V2_real.log went out tif:"Ioc" despite
+        // the strategy requesting ALO since February.
+        //
+        // While the sticky override is active we keep the script's choice and
+        // still consume the +8 STOP flag above. Cleared by 50012("Ioc"/"Gtc")
+        // and at login.
+        if (hl::g_config.orderTypeSticky) {
+            if (baseType != 0 && baseType != 2 && baseType != 4) {
+                return 0;  // AON (1), AON+GTC (3) still unsupported
+            }
+            if (hl::g_config.diagLevel >= 1) {
+                hl::g_logger.logf(1, "SET_ORDERTYPE: %d ignored — sticky %s "
+                    "override active (50012)%s",
+                    orderType, hl::g_config.orderType, isStop ? " [STOP]" : "");
+            }
+            return (orderType == 0) ? 1 : orderType;
+        }
+
         switch (baseType) {
         case 0:  // Broker default → IOC (highest fill probability on HL)
             strcpy_s(hl::g_config.orderType, "Ioc");
@@ -103,8 +119,13 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
             hl::trading::setOrderType("Gtc");
             break;
         case 4:  // Broker-specific → ALO (Post-Only / Add-Liquidity-Only)
+            // Zorro never sends this; only a script calling
+            // brokerCommand(157,4) directly reaches it. Treat it as the same
+            // explicit intent 50012("Alo") expresses, so the next auto-call
+            // does not undo it.
             strcpy_s(hl::g_config.orderType, "Alo");
             hl::trading::setOrderType("Alo");
+            hl::g_config.orderTypeSticky = true;
             break;
         default:
             return 0;  // AON (1), AON+GTC (3) not supported
@@ -373,8 +394,15 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
     case DO_CANCEL: {
         int tradeId = (int)parameter;
         if (tradeId == 0) {
-            hl::g_logger.log(1, "DO_CANCEL: Cancel all not implemented");
-            return 0;
+            // [OPM-797] Cancel every resting order for the current SET_SYMBOL,
+            // or account-wide when no symbol has been selected. Sourced from
+            // the exchange, not the tradeMap, so orders left behind by a
+            // crashed session are reachable after a restart.
+            const char* sym = hl::g_trading.currentSymbol;
+            int n = hl::trading::cancelAllOrders((sym && *sym) ? sym : nullptr);
+            hl::g_logger.logf(1, "DO_CANCEL(0): cancelled %d resting order(s) for %s",
+                              n, (sym && *sym) ? sym : "ALL symbols");
+            return n;
         }
 
         bool success = hl::trading::cancelOrderByTradeId(tradeId);
@@ -387,345 +415,8 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         return success ? 1 : 0;
     }
 
-    //=========================================================================
-    // CUSTOM HYPERLIQUID COMMANDS
-    //=========================================================================
-
-    case HL_ENABLE_WEBSOCKET: {
-        int enable = (int)parameter;
-
-        if (enable && !hl::g_config.enableWebSocket) {
-            hl::g_config.enableWebSocket = true;
-
-            if (!hl::g_priceCache) {
-                hl::g_priceCache = new hl::ws::PriceCache();
-            }
-            if (!hl::g_wsManager) {
-                auto* cache = static_cast<hl::ws::PriceCache*>(hl::g_priceCache);
-                auto* wsMgr = new hl::ws::WebSocketManager(*cache);
-                wsMgr->setDiagLevel(hl::g_config.diagLevel);
-                wsMgr->setUserAddress(hl::g_config.walletAddress);
-                hl::g_wsManager = wsMgr;
-            }
-
-            std::string wsUrl = hl::g_config.baseUrl;
-            size_t pos = wsUrl.find("https://");
-            if (pos != std::string::npos) {
-                wsUrl.replace(pos, 8, "wss://");
-            }
-            wsUrl += "/ws";
-
-            auto* wsMgr = static_cast<hl::ws::WebSocketManager*>(hl::g_wsManager);
-            wsMgr->start(wsUrl, hl::g_config.isTestnet);
-
-            hl::g_logger.log(1, "WebSocket enabled");
-            return 1;
-        }
-
-        if (!enable && hl::g_config.enableWebSocket) {
-            hl::g_config.enableWebSocket = false;
-
-            if (hl::g_wsManager) {
-                auto* wsMgr = static_cast<hl::ws::WebSocketManager*>(hl::g_wsManager);
-                wsMgr->stop();
-                delete wsMgr;
-                hl::g_wsManager = nullptr;
-            }
-            if (hl::g_priceCache) {
-                auto* cache = static_cast<hl::ws::PriceCache*>(hl::g_priceCache);
-                delete cache;
-                hl::g_priceCache = nullptr;
-            }
-
-            hl::g_logger.log(1, "WebSocket disabled");
-            return 1;
-        }
-
-        return hl::g_config.enableWebSocket ? 1 : 0;
-    }
-
-    case HL_SET_ORDER_TYPE: {
-        const char* orderType = (const char*)parameter;
-        if (!orderType || !*orderType) return 0;
-
-        if (_stricmp(orderType, "Ioc") == 0 ||
-            _stricmp(orderType, "Gtc") == 0 ||
-            _stricmp(orderType, "Alo") == 0) {
-            strcpy_s(hl::g_config.orderType, orderType);
-            hl::trading::setOrderType(orderType);
-            if (hl::g_config.diagLevel >= 1) {
-                hl::g_logger.logf(1, "Order type set: %s", orderType);
-            }
-            return 1;
-        }
-        hl::g_logger.logf(1, "Invalid order type: %s", orderType);
-        return 0;
-    }
-
-    case HL_SET_ACCOUNT_MODE: {
-        int mode = (int)parameter;
-        if (mode < 0 || mode > 1) return 0;
-        hl::g_config.accountMode = mode;
-        // [OPM-202] When vault mode enabled, use walletAddress as vaultAddress
-        if (mode == 1 && !hl::g_config.vaultAddress[0]) {
-            strncpy_s(hl::g_config.vaultAddress, hl::g_config.walletAddress, _TRUNCATE);
-        } else if (mode == 0) {
-            hl::g_config.vaultAddress[0] = '\0';
-        }
-        if (hl::g_config.diagLevel >= 1) {
-            hl::g_logger.logf(1, "Account mode: %d (%s) vaultAddress=%s",
-                              mode, mode == 0 ? "API wallet" : "vault",
-                              hl::g_config.vaultAddress[0] ? hl::g_config.vaultAddress : "(none)");
-        }
-        return 1;
-    }
-
-    case HL_GET_OPEN_ORDERS: {
-        const char* symbol = (parameter != 0) ? (const char*)parameter : nullptr;
-        if (!hl::g_config.enableWebSocket || !hl::g_priceCache) {
-            if (hl::g_config.diagLevel >= 2)
-                hl::g_logger.log(2, "GET_OPEN_ORDERS: WS not available, returning 0");
-            return 0;
-        }
-        auto* cache = static_cast<hl::ws::PriceCache*>(hl::g_priceCache);
-        int count = 0;
-        if (symbol && symbol[0]) {
-            count = static_cast<int>(cache->getOpenOrdersForCoin(symbol).size());
-        } else {
-            count = static_cast<int>(cache->getAllOpenOrders().size());
-        }
-        if (hl::g_config.diagLevel >= 2)
-            hl::g_logger.logf(2, "GET_OPEN_ORDERS(%s): %d", symbol ? symbol : "ALL", count);
-        return count;
-    }
-
-    case HL_VALIDATE_PRICES: {
-        auto btcPrice = hl::market::getPrice("BTC");
-        auto ethPrice = hl::market::getPrice("ETH");
-        auto solPrice = hl::market::getPrice("SOL");
-
-        bool ok = (btcPrice.mid > 0 && ethPrice.mid > 0 && solPrice.mid > 0);
-
-        if (hl::g_config.diagLevel >= 1) {
-            char msg[128];
-            sprintf_s(msg, "Prices: BTC=%.2f ETH=%.2f SOL=%.2f",
-                      btcPrice.mid, ethPrice.mid, solPrice.mid);
-            hl::g_logger.log(1, msg);
-        }
-        return ok ? 1 : 0;
-    }
-
-    case HL_GET_FUNDING_RATE: {
-        // Return current hourly funding rate for a coin [OPM-172]
-        // Parameter: string coin name (recommended), or 0 to use currentSymbol
-        // currentSymbol is set by BrokerAsset price queries (from asset() calls)
-        const char* coin = nullptr;
-        if (parameter != 0) {
-            coin = (const char*)parameter;
-        } else {
-            coin = hl::g_trading.currentSymbol;
-        }
-        if (!coin || !*coin) {
-            hl::g_logger.log(1, "HL_GET_FUNDING_RATE: no coin — pass coin name as parameter "
-                                "or call asset() first [OPM-197]");
-            return 0.0;
-        }
-        return hl::market::getFundingRate(coin);
-    }
-
-    case HL_FORCE_WS_DISCONNECT: {
-        // Debug: force WebSocket disconnect to test auto-reconnect [OPM-170]
-        if (!hl::g_wsManager) return 0;
-        auto* wsMgr = static_cast<hl::ws::WebSocketManager*>(hl::g_wsManager);
-        hl::g_logger.log(1, "DEBUG: Forcing WS disconnect (OPM-170 test)");
-        wsMgr->forceDisconnectForTest();
-        return 1;
-    }
-
-    case HL_SCHEDULE_CANCEL: {
-        // Dead man's switch [OPM-83]
-        // param = seconds from now (0 = clear). Plugin converts to absolute ms.
-        int seconds = (int)parameter;
-        if (seconds > 0) {
-            uint64_t timeMs = ((uint64_t)time(nullptr) + (uint64_t)seconds) * 1000;
-            return hl::trading::scheduleCancel(timeMs) ? 1 : 0;
-        }
-        return hl::trading::clearScheduleCancel() ? 1 : 0;
-    }
-
-    //=========================================================================
-    // EXPORT COMMANDS (50001-50003) [OPM-13]
-    //=========================================================================
-
-    case HL_EXPORT_ASSETS: {
-        // Export basic asset CSV for top coins (BTC, ETH, SOL)
-        const char* path = (const char*)parameter;
-        if (!path || !*path) return 0;
-
-        FILE* f = nullptr;
-        if (0 != fopen_s(&f, path, "w") || !f) return 0;
-
-        fprintf(f, "Name,Price,Spread,RollLong,RollShort,PIP,PIPCost,MarginCost,Leverage,LotAmount,Commission\n");
-
-        const char* coins[] = {"BTC", "ETH", "SOL"};
-        for (int i = 0; i < 3; i++) {
-            hl::PriceData px = hl::market::getPrice(coins[i]);
-            if (px.mid <= 0) continue;
-
-            const hl::AssetInfo* asset = hl::market::getAsset(coins[i]);
-            if (!asset) continue;  // [OPM-198] skip assets without metadata
-            double pip = asset->tickSize;
-            double lotAmt = asset->minSize;
-            int lev = asset->maxLeverage;
-            double pipCost = pip * lotAmt;  // 10^(-6) for perps, 10^(-8) for spot [OPM-141]
-            double spread = (px.ask > 0 && px.bid > 0) ? (px.ask - px.bid) : 0.0;
-
-            fprintf(f, "%s,%.8f,%.8f,0,0,%.8f,%.8f,0,%d,%.8f,-0.035\n",
-                    coins[i], px.mid, spread, pip, pipCost, lev, lotAmt);
-        }
-
-        fclose(f);
-        if (hl::g_config.diagLevel >= 1)
-            hl::g_logger.logf(1, "HL_EXPORT_ASSETS: Wrote %s", path);
-        return 1;
-    }
-
-    case HL_EXPORT_META: {
-        // Export all assets from registry into Zorro Assets CSV
-        const char* path = (const char*)parameter;
-        if (!path || !*path) return 0;
-        if (hl::g_assets.count <= 0) return 0;
-
-        FILE* f = nullptr;
-        if (0 != fopen_s(&f, path, "w") || !f) return 0;
-
-        fprintf(f, "Name,Price,Spread,RollLong,RollShort,PIP,PIPCost,MarginCost,Leverage,LotAmount,Commission\n");
-
-        // Use PriceCache for fast bulk lookups (no HTTP fallback)
-        hl::ws::PriceCache* cache = hl::g_priceCache
-            ? static_cast<hl::ws::PriceCache*>(hl::g_priceCache) : nullptr;
-
-        int written = 0;
-        for (int i = 0; i < hl::g_assets.count; i++) {
-            const hl::AssetInfo* asset = hl::g_assets.getByIndex(i);
-            if (!asset || !asset->coin[0]) continue;
-
-            double mid = 0.0, spread = 0.0;
-            if (cache) {
-                double bid = cache->getBid(asset->coin);
-                double ask = cache->getAsk(asset->coin);
-                if (bid > 0 && ask > 0) {
-                    mid = (bid + ask) / 2.0;
-                    spread = ask - bid;
-                }
-            }
-
-            double pip = asset->tickSize;       // [OPM-198] use pre-calculated
-            double lotAmt = asset->minSize;
-            double pipCost = pip * lotAmt;  // 10^(-6) for perps, 10^(-8) for spot [OPM-141]
-
-            fprintf(f, "%s,%.8f,%.8f,0,0,%.8f,%.8f,0,%d,%.8f,-0.035\n",
-                    asset->coin, mid, spread, pip, pipCost, asset->maxLeverage, lotAmt);
-            written++;
-        }
-
-        fclose(f);
-        if (hl::g_config.diagLevel >= 1)
-            hl::g_logger.logf(1, "HL_EXPORT_META: Wrote %d assets to %s", written, path);
-        return written;
-    }
-
-    case HL_EXPORT_ACCOUNT: {
-        // Export Accounts.csv row with current connection info
-        const char* path = (const char*)parameter;
-        if (!path || !*path) return 0;
-
-        FILE* f = nullptr;
-        if (0 != fopen_s(&f, path, "w") || !f) return 0;
-
-        const char* dllName =
-#ifdef DEV_BUILD
-            "Hyperliquid_Dev.dll";
-#else
-            "Hyperliquid.dll";
-#endif
-
-        fprintf(f, "Name,Server,AccountId,User,Pass,Assets,CCY,Real,NFA,Plugin\n");
-        fprintf(f, "%s,%s,%s,%s,%s,AssetsHyperliquid,USD,%d,2,%s\n",
-                PLUGIN_NAME,
-                hl::g_config.baseUrl[0] ? hl::g_config.baseUrl : "https://api.hyperliquid.xyz",
-                hl::g_config.walletAddress[0] ? hl::g_config.walletAddress : "0",
-                hl::g_config.walletAddress[0] ? hl::g_config.walletAddress : "0",
-                hl::g_config.privateKey[0] ? hl::g_config.privateKey : "0",
-                hl::g_config.isTestnet ? 0 : 1,
-                dllName);
-
-        fclose(f);
-        if (hl::g_config.diagLevel >= 1)
-            hl::g_logger.logf(1, "HL_EXPORT_ACCOUNT: Wrote %s", path);
-        return 1;
-    }
-
-    //=========================================================================
-    // TWAP COMMANDS (50040-50041) [OPM-81]
-    //=========================================================================
-
-    case HL_PLACE_TWAP: {
-        if (parameter == 0) return 0;
-        const hl::TwapRequest* req = (const hl::TwapRequest*)parameter;
-        hl::TwapResult res = hl::trading::placeTwapOrder(*req);
-        if (!res.success) {
-            hl::g_logger.logf(1, "HL_PLACE_TWAP failed: %s", res.error.c_str());
-            return 0;
-        }
-        return (double)res.twapId;
-    }
-
-    case HL_CANCEL_TWAP: {
-        uint64_t twapId = (uint64_t)parameter;
-        if (twapId == 0) return 0;
-        const char* coin = hl::g_trading.currentSymbol;
-        if (!coin || !*coin) return 0;
-        bool ok = hl::trading::cancelTwapOrder(coin, twapId);
-        return ok ? 1 : 0;
-    }
-
-    //=========================================================================
-    // MODIFY ORDER (50042) [OPM-80]
-    //=========================================================================
-
-    case HL_MODIFY_ORDER: {
-        if (parameter == 0) return 0;
-        const hl::ModifyRequest* req = (const hl::ModifyRequest*)parameter;
-        hl::ModifyResult res = hl::trading::modifyOrder(*req);
-        if (!res.success) {
-            hl::g_logger.logf(1, "HL_MODIFY_ORDER failed: %s", res.error.c_str());
-            return 0;
-        }
-        return 1;
-    }
-
-    //=========================================================================
-    // BRACKET ORDER (50043) [OPM-79]
-    //=========================================================================
-
-    case HL_PLACE_BRACKET: {
-        if (parameter == 0) return 0;
-        const hl::BracketRequest* req = (const hl::BracketRequest*)parameter;
-        hl::BracketResult res = hl::trading::placeBracketOrder(*req);
-        if (!res.success) {
-            hl::g_logger.logf(1, "HL_PLACE_BRACKET failed: %s", res.error.c_str());
-            return 0;
-        }
-        return (double)res.entryTradeId;
-    }
-
     default:
-        if (hl::g_config.diagLevel >= 3) {
-            char msg[64];
-            sprintf_s(msg, "BrokerCommand: Unknown mode %d", mode);
-            hl::g_logger.log(3, msg);
-        }
-        return 0;
+        // Hyperliquid-specific 500xx commands.
+        return handleHyperliquidCommand(mode, parameter);
     }
 }

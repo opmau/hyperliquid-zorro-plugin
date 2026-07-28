@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(HyperliquidPlugin VERSION 2.0.7 LANGUAGES CXX C)
+project(HyperliquidPlugin VERSION 2.1.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -76,6 +76,9 @@ add_library(hl_services STATIC
     src/services/hl_market_service.cpp
     src/services/hl_trading_service.cpp
     src/services/hl_trading_cancel.cpp
+    src/services/hl_trading_lookup.cpp
+    src/services/hl_trading_response.cpp
+    src/services/hl_trading_openorders.cpp
     src/services/hl_trading_twap.cpp
     src/services/hl_trading_modify.cpp
     src/services/hl_trading_bracket.cpp
@@ -108,7 +111,9 @@ add_library(hl_api STATIC
     src/api/hl_broker.cpp
     src/api/hl_broker_market.cpp
     src/api/hl_broker_trade.cpp
+    src/api/hl_broker_trade_query.cpp
     src/api/hl_broker_commands.cpp
+    src/api/hl_broker_commands_hl.cpp
 )
 target_include_directories(hl_api PUBLIC
     ${CMAKE_SOURCE_DIR}/src/api
@@ -130,7 +135,9 @@ add_library(Hyperliquid SHARED
     src/api/hl_broker.cpp
     src/api/hl_broker_market.cpp
     src/api/hl_broker_trade.cpp
+    src/api/hl_broker_trade_query.cpp
     src/api/hl_broker_commands.cpp
+    src/api/hl_broker_commands_hl.cpp
 )
 target_include_directories(Hyperliquid PRIVATE
     ${CMAKE_SOURCE_DIR}/src/api

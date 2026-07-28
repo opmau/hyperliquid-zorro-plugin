@@ -50,6 +50,15 @@ struct RuntimeConfig {
     int accountMode = 0;            // 0=API wallet, 1=vault/subaccount
     bool stopOrderPending = false;  // True when SET_ORDERTYPE +8 was set [OPM-77]
 
+    // [OPM-791] Sticky order-type override. Zorro auto-calls SET_ORDERTYPE at
+    // every order entry and can only derive 0/1/2/3 from TradeMode, so it
+    // always downgraded a script's brokerCommand(50012,"Alo") back to "Ioc"
+    // before the order was built — no ALO order ever reached the exchange.
+    // When true, SET_ORDERTYPE leaves orderType alone (it still consumes the
+    // +8 STOP flag). Set by 50012("Alo"), cleared by 50012("Ioc"/"Gtc") and
+    // at login/logout.
+    bool orderTypeSticky = false;
+
     // Zorro integration
     HWND zorroWindow = NULL;        // For WM_APP+1 notifications
     int cacheTimeoutMs = 2000;      // General cache timeout

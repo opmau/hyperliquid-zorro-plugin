@@ -79,12 +79,15 @@ constexpr int MAX_RECENT_FILLS         = 100;    // Recent fills to keep in cach
 
 constexpr int PLUGIN_TYPE              = 2;      // Zorro plugin type (2 = broker)
 
+// Unreferenced: the API layer reports PLUGIN_NAME/PLUGIN_VERSION from
+// hl_broker_internal.h. Kept in step so the two cannot disagree if a future
+// caller picks these up instead.
 #ifdef DEV_BUILD
 constexpr const char* PLUGIN_NAME      = "Hyperliquid-DEV";
-constexpr const char* PLUGIN_VERSION   = "1.1.0-DEV";
+constexpr const char* PLUGIN_VERSION   = "2.1.0-DEV";
 #else
 constexpr const char* PLUGIN_NAME      = "Hyperliquid";
-constexpr const char* PLUGIN_VERSION   = "1.1.0-FullNative";
+constexpr const char* PLUGIN_VERSION   = "2.1.0";
 #endif
 
 } // namespace config

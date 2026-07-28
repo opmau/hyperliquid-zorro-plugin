@@ -7,10 +7,13 @@
 // DEPENDENCIES: hl_broker_internal.h
 // THREAD SAFETY: Main thread only (Zorro calls are single-threaded)
 //
-// This module provides order execution exports:
+// This module provides the order EXECUTION exports:
 // - BrokerBuy2: place new orders
 // - BrokerSell2: close positions
-// - BrokerTrade: query trade status and P&L
+//
+// Trade status queries (BrokerTrade) live in hl_broker_trade_query.cpp.
+// The two share the position-accounting helpers defined below and declared
+// in hl_broker_internal.h.
 //=============================================================================
 
 #include "hl_broker_internal.h"
@@ -25,8 +28,8 @@
 // size (filledSize - closedSize) > 0, so trades fully closed by Zorro stop
 // counting and the IMPORTED_ trade returns to sole-tracker self-healing.
 //-----------------------------------------------------------------------------
-static bool hasOtherSameSideTracker(int excludeTradeId, const char* coin,
-                                    hl::OrderSide side) {
+bool hasOtherSameSideTracker(int excludeTradeId, const char* coin,
+                             hl::OrderSide side) {
     if (!hl::g_trading.tradeCsInit) return false;
     bool found = false;
     EnterCriticalSection(&hl::g_trading.tradeCs);
@@ -65,7 +68,7 @@ static bool hasOtherSameSideTracker(int excludeTradeId, const char* coin,
 //     BrokerTrade reports filledSize - closedSize (OPM-733 incident 1:
 //     partial close re-reported as the gross entry fill).
 //-----------------------------------------------------------------------------
-static void recordZorroClose(int tradeId, hl::OrderState& state, double closeSz) {
+void recordZorroClose(int tradeId, hl::OrderState& state, double closeSz) {
     if (closeSz <= 0) return;
     if (strncmp(state.orderId, "IMPORTED_", 9) == 0) {
         double newShare = state.filledSize - closeSz;
@@ -371,7 +374,13 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
         }
     }
 
-    hl::OrderResult result = hl::trading::placeOrder(request);
+    // [OPM-792] Place under an explicit internal tradeId so the resting close
+    // order stays addressable. placeOrder() allocates one internally and drops
+    // it on the floor, which left the close order uncancellable from script:
+    // BrokerSell2 returns the ORIGINAL id, so DO_CANCEL targeted the already
+    // filled entry oid.
+    int closeTradeId = hl::trading::generateTradeId();
+    hl::OrderResult result = hl::trading::placeOrderWithId(request, closeTradeId);
 
     if (!result.success) {
         // [OPM-227] Close rejected — re-check position (may have been closed
@@ -396,10 +405,22 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
         return 0;
     }
 
-    if (pFill) *pFill = (result.filledSize > 0 && hl::g_trading.lotSize > 0)
-        ? (int)round(result.filledSize / hl::g_trading.lotSize) : abs(amount);
+    // [OPM-792] Report ONLY what the exchange actually filled.
+    //
+    // This used to report abs(amount) — a full close — whenever filledSize was
+    // 0, which is exactly what a resting (ALO/GTC) close order returns. Zorro
+    // then wrote the position off its books while the contracts were still on
+    // the exchange, and applyFill/recordZorroClose corrupted the plugin's own
+    // caches to match. A resting close must move nothing until it fills; the
+    // WS userFills / BrokerTrade poll picks the fill up when it happens.
+    double closeFillSize = (result.filledSize > 0) ? result.filledSize : 0.0;
+    bool restingClose = (closeFillSize <= 0);
 
-    double closePx = result.avgPrice > 0 ? result.avgPrice : request.limitPrice;
+    if (pFill) *pFill = (closeFillSize > 0 && hl::g_trading.lotSize > 0)
+        ? (int)round(closeFillSize / hl::g_trading.lotSize) : 0;
+
+    // pClose/pProfit describe a realised close — leave them at 0 while resting.
+    double closePx = (closeFillSize > 0 && result.avgPrice > 0) ? result.avgPrice : 0.0;
     if (pClose) *pClose = closePx;
 
     // pCost: Hyperliquid perps have no rollover/swap fees, so always 0 [OPM-215]
@@ -407,302 +428,38 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
 
     // pProfit: P&L from entry price vs close fill price [OPM-215]
     if (pProfit && state.avgPrice > 0 && closePx > 0) {
-        double fillSz = (result.filledSize > 0) ? result.filledSize : closeSize;
-        double pnl = (closePx - state.avgPrice) * fillSz;
+        double pnl = (closePx - state.avgPrice) * closeFillSize;
         if (state.side == hl::OrderSide::Sell) pnl = -pnl;  // Short: invert
         *pProfit = pnl;
     }
 
-    // Bridge fill → position cache so GET_POSITION sees it immediately [OPM-85]
-    double closeFillSize = (result.filledSize > 0) ? result.filledSize : closeSize;
-    double closeFillPx = result.avgPrice > 0 ? result.avgPrice : request.limitPrice;
-    if (closeFillSize > 0 && closeFillPx > 0) {
-        hl::account::applyFill(state.coin, closeFillSize, closeFillPx, closingBuy);
+    if (closeFillSize > 0 && closePx > 0) {
+        // Bridge fill → position cache so GET_POSITION sees it immediately [OPM-85]
+        hl::account::applyFill(state.coin, closeFillSize, closePx, closingBuy);
+        // [OPM-680][OPM-733] Record the Zorro-driven close so BrokerTrade's
+        // fill-poll reports the reduced open size (see recordZorroClose).
+        recordZorroClose(tradeId, state, closeFillSize);
     }
 
-    // [OPM-680][OPM-733] Record the Zorro-driven close so BrokerTrade's
-    // fill-poll reports the reduced open size (see recordZorroClose).
-    recordZorroClose(tradeId, state, closeFillSize);
+    // [OPM-792] Link the close order to the position while any of it is still
+    // working, so DO_CANCEL(tradeId) reaches the close order rather than the
+    // filled entry oid. Cleared once the close is fully filled.
+    bool fullyClosed = (closeFillSize >= closeSize - 1e-12);
+    hl::OrderState linkState;
+    if (hl::trading::getOrder(tradeId, linkState)) {
+        linkState.closeTradeId = fullyClosed ? 0 : closeTradeId;
+        hl::trading::storeOrder(tradeId, linkState);
+    }
+
+    if (hl::g_config.diagLevel >= 1) {
+        hl::g_logger.logf(1, "BrokerSell2: %s — requested %.6f, filled %.6f "
+                          "(closeTradeId=%d oid=%s)",
+                          restingClose ? "RESTING (nothing closed yet)"
+                                       : (fullyClosed ? "FILLED" : "PARTIAL"),
+                          closeSize, closeFillSize, closeTradeId,
+                          result.oid.c_str());
+    }
 
     return tradeId;
 }
 
-//=============================================================================
-// BrokerTrade - Query trade status
-//=============================================================================
-
-DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
-                        double* pRoll, double* pProfit) {
-    if (!hl::g_config.walletAddress[0]) return 0;
-
-    if (hl::g_config.diagLevel >= 2) {
-        char msg[64];
-        sprintf_s(msg, "BrokerTrade: TradeID=%d", tradeId);
-        hl::g_logger.log(2, msg);
-    }
-
-    // Get trade state
-    hl::OrderState state;
-    if (!hl::trading::getOrder(tradeId, state)) {
-        if (hl::g_config.diagLevel >= 2)
-            hl::g_logger.log(2, "BrokerTrade: Trade not found - returning NAY");
-        return NAY;
-    }
-
-    // --- PENDING_ reconciliation [OPM-89] ---
-    // Orders with synthetic "PENDING_<cloid>" orderId need exchange query to
-    // determine real status.
-    if (strncmp(state.orderId, "PENDING_", 8) == 0) {
-        hl::g_logger.logf(1, "BrokerTrade: PENDING order %d (cloid=%s) — querying exchange",
-                          tradeId, state.cloid);
-
-        hl::CloidQueryResult qr = hl::trading::queryOrderByCloid(state.cloid);
-
-        if (qr.outcome == hl::QueryOutcome::Found) {
-            if (qr.oid[0]) {
-                hl::OrderState updated = state;
-                strncpy_s(updated.orderId, qr.oid, _TRUNCATE);
-                if (strcmp(qr.status, "filled") == 0) {
-                    updated.status = hl::determineFilledStatus(qr.filledSize, state.requestedSize);
-                    updated.filledSize = qr.filledSize;
-                    updated.avgPrice = qr.avgPrice;
-                } else if (strcmp(qr.status, "canceled") == 0 ||
-                           strcmp(qr.status, "siblingFilledCanceled") == 0) {  // [OPM-79]
-                    updated.status = hl::OrderStatus::Cancelled;
-                } else {
-                    updated.status = hl::OrderStatus::Open;
-                }
-                updated.lastUpdate = (double)time(NULL) / 86400.0 + 25569.0;
-                hl::trading::storeOrder(tradeId, updated);
-                state = updated;
-                hl::g_logger.logf(1, "BrokerTrade: PENDING resolved -> oid=%s status=%s",
-                                  qr.oid, qr.status);
-            }
-        } else if (qr.outcome == hl::QueryOutcome::NotFound) {
-            hl::trading::updateOrder(tradeId, 0, 0, hl::OrderStatus::Cancelled);
-            hl::g_logger.logf(1, "BrokerTrade: PENDING %d NOT_FOUND — returning NAY-1", tradeId);
-            return NAY - 1;
-        } else {
-            hl::g_logger.logf(1, "BrokerTrade: PENDING %d query FAILED — returning NAY", tradeId);
-            return NAY;
-        }
-    }
-
-    // --- RESUMED_ early return [OPM-90] ---
-    // Historical positions synced from broker on startup. No real order ID,
-    // so skip WS/HTTP lookups. Use cached entry price + live price for P&L.
-    if (strncmp(state.orderId, "RESUMED_", 8) == 0) {
-        if (pOpen) *pOpen = state.avgPrice;
-        if (pRoll) *pRoll = 0;
-        if (pProfit && state.avgPrice > 0) {
-            hl::PriceData price = hl::market::getPrice(state.coin);
-            double currentPx = price.mid > 0 ? price.mid : price.ask;
-            if (currentPx > 0) {
-                double pnl = (currentPx - state.avgPrice) * state.filledSize;
-                if (state.side == hl::OrderSide::Sell) pnl = -pnl;
-                *pProfit = pnl;
-            }
-        }
-        int fillLots = (hl::g_trading.lotSize > 0)
-            ? (int)round(state.filledSize / hl::g_trading.lotSize)
-            : (int)round(state.filledSize);
-        if (fillLots < 1 && state.filledSize > 0) fillLots = 1;
-        if (hl::g_config.diagLevel >= 2)
-            hl::g_logger.logf(2, "BrokerTrade: RESUMED %d -> %d lots (%.6f)",
-                              tradeId, fillLots, state.filledSize);
-        return fillLots;
-    }
-
-    // --- IMPORTED_ share-of-position reporting [OPM-90, OPM-680] ---
-    // Positions synced via GET_TRADES need to map a single broker aggregate
-    // position onto Zorro's per-tradeID fill model. Two regimes:
-    //
-    //   1. SOLE TRACKER — this IMPORTED_ is the only Zorro tradeID on the
-    //      asset+side. The broker aggregate IS this trade's share. We report
-    //      fabs(livePos.size) and keep state.filledSize synced to it. This
-    //      preserves the OPM-90/18c287c behavior: external partial closes
-    //      (manual operator, partial liquidation) are auto-detected because
-    //      the live aggregate shrinks.
-    //
-    //   2. MULTI TRACKER — another Zorro tradeID exists on the same asset+side
-    //      (e.g., BrokerBuy2 extended the position). Reporting the live
-    //      aggregate would double-count, because the other tradeID is also
-    //      tracking its own fill. We report state.filledSize (this trade's
-    //      share), kept accurate by:
-    //        - BrokerBuy2's pre-extend snapshot (captures the IMPORTED_'s
-    //          share at the moment a new same-side tradeID is created)
-    //        - BrokerSell2's decrement hook (subtracts Zorro-driven closes)
-    //
-    // Close/reverse detection always uses the live position: if the broker
-    // reports zero or opposite direction, this trade is done regardless of
-    // state.filledSize. External partial closes after entering multi-tracker
-    // mode are NOT auto-detected — that ambiguity cannot be resolved at the
-    // plugin level (we don't know which tradeID's share to debit). Strategies
-    // that need this should reconcile at the strategy layer.
-    if (strncmp(state.orderId, "IMPORTED_", 9) == 0) {
-        hl::account::PositionInfo livePos = hl::account::getPosition(state.coin);
-        bool importWasLong = (state.side == hl::OrderSide::Buy);
-        bool currentIsLong = (livePos.size > 0);
-
-        // Position closed or reversed direction -> trade is done
-        if (!livePos.isOpen() || (importWasLong != currentIsLong)) {
-            if (hl::g_config.diagLevel >= 1)
-                hl::g_logger.logf(1, "BrokerTrade: IMPORTED %d %s — position %s",
-                    tradeId, state.coin, !livePos.isOpen() ? "CLOSED" : "REVERSED");
-            if (pOpen) *pOpen = state.avgPrice;
-            if (pClose) *pClose = livePos.entryPrice > 0 ? livePos.entryPrice : state.avgPrice;
-            if (pRoll) *pRoll = 0;
-            if (pProfit) *pProfit = 0;
-            return 0;  // Trade closed/reversed
-        }
-
-        // Detect multi-tracker regime via the shared predicate ([OPM-733]:
-        // must match BrokerBuy2's snapshot gate, and a sibling fully closed
-        // by Zorro no longer counts — sole-tracker self-healing resumes).
-        bool multiTracker = hasOtherSameSideTracker(tradeId, state.coin, state.side);
-
-        double actualSize;
-        bool soleMode = !multiTracker;
-        if (soleMode) {
-            // Sole tracker: live aggregate IS this trade's share
-            actualSize = fabs(livePos.size);
-            if (state.filledSize != actualSize) {
-                state.filledSize = actualSize;
-                hl::trading::storeOrder(tradeId, state);
-            }
-        } else {
-            // Multi-tracker: this trade's recorded share (set by BrokerBuy2
-            // snapshot + decremented by BrokerSell2 hook)
-            actualSize = state.filledSize;
-        }
-
-        double entryPx = state.avgPrice > 0 ? state.avgPrice : livePos.entryPrice;
-        if (pOpen) *pOpen = entryPx;
-        if (pRoll) *pRoll = 0;
-        if (pProfit && entryPx > 0 && actualSize > 0) {
-            hl::PriceData price = hl::market::getPrice(state.coin);
-            double currentPx = price.mid > 0 ? price.mid : price.ask;
-            if (currentPx > 0) {
-                double pnl = (currentPx - entryPx) * actualSize;
-                if (!currentIsLong) pnl = -pnl;
-                *pProfit = pnl;
-            }
-        }
-        int fillLots = (hl::g_trading.lotSize > 0)
-            ? (int)round(actualSize / hl::g_trading.lotSize)
-            : (int)round(actualSize);
-        if (fillLots < 1 && actualSize > 0) fillLots = 1;
-        if (hl::g_config.diagLevel >= 2)
-            hl::g_logger.logf(2, "BrokerTrade: IMPORTED %d -> %d lots (%s, share=%.6f, live=%.6f)",
-                              tradeId, fillLots, soleMode ? "sole" : "multi",
-                              actualSize, fabs(livePos.size));
-        return fillLots;
-    }
-
-    // --- WS PriceCache check for normal orders [OPM-90] ---
-    // Check for fills/open orders in WS cache. This catches updates that
-    // the onOrderUpdate/onFillNotify callbacks may have missed.
-    if (hl::g_config.enableWebSocket && hl::g_priceCache && state.orderId[0]) {
-        auto* cache = static_cast<hl::ws::PriceCache*>(hl::g_priceCache);
-        auto wsFills = cache->getFillsForOrder(state.orderId);
-
-        if (!wsFills.empty()) {
-            double totalFilled = 0, totalValue = 0;
-            for (const auto& fill : wsFills) {
-                totalFilled += fill.sz;
-                totalValue += fill.px * fill.sz;
-            }
-            double avgPx = totalValue / totalFilled;
-
-            if (totalFilled >= state.filledSize) {
-                hl::OrderStatus newSt = hl::determineFilledStatus(totalFilled, state.requestedSize);
-                hl::trading::updateOrder(tradeId, totalFilled, avgPx, newSt);
-                state.filledSize = totalFilled;
-                state.avgPrice = avgPx;
-            }
-        } else if (state.filledSize <= 0) {
-            auto wsOrder = cache->getOpenOrder(state.orderId);
-            if (!wsOrder.oid.empty()) {
-                if (hl::g_config.diagLevel >= 2)
-                    hl::g_logger.logf(2, "BrokerTrade: WS shows order %d still open", tradeId);
-            }
-        }
-    }
-
-    // --- HTTP stale check for non-terminal orders [OPM-90, OPM-91] ---
-    // Query exchange for orders that are Open or PartialFill after staleness window.
-    // Uses 5s for unfilled, 10s for partially-filled (reduces HTTP load for GTC orders).
-    if ((state.status == hl::OrderStatus::Open || state.status == hl::OrderStatus::PartialFill)
-        && state.cloid[0] && state.lastUpdate > 0) {
-        double now = (double)time(NULL) / 86400.0 + 25569.0;
-        double ageSec = (now - state.lastUpdate) * 86400.0;
-        double staleThreshold = (state.filledSize > 0) ? 10.0 : 5.0;
-        if (ageSec > staleThreshold) {
-            hl::CloidQueryResult qr = hl::trading::queryOrderByCloid(state.cloid);
-            if (qr.outcome == hl::QueryOutcome::Found) {
-                if (strcmp(qr.status, "filled") == 0 && qr.filledSize > 0) {
-                    hl::OrderStatus newSt = hl::determineFilledStatus(qr.filledSize, state.requestedSize);
-                    hl::trading::updateOrder(tradeId, qr.filledSize, qr.avgPrice, newSt);
-                    state.filledSize = qr.filledSize;
-                    state.avgPrice = qr.avgPrice;
-                    state.status = newSt;
-                    if (qr.oid[0]) strncpy_s(state.orderId, qr.oid, _TRUNCATE);
-                    hl::g_logger.logf(1, "BrokerTrade: HTTP fallback found fill for %d", tradeId);
-                } else if (strcmp(qr.status, "canceled") == 0 ||
-                           strcmp(qr.status, "siblingFilledCanceled") == 0) {  // [OPM-79]
-                    hl::trading::updateOrder(tradeId, 0, 0, hl::OrderStatus::Cancelled);
-                    state.status = hl::OrderStatus::Cancelled;
-                } else if (qr.oid[0] && strcmp(state.orderId, qr.oid) != 0) {
-                    hl::OrderState updated = state;
-                    strncpy_s(updated.orderId, qr.oid, _TRUNCATE);
-                    updated.lastUpdate = now;
-                    hl::trading::storeOrder(tradeId, updated);
-                    state = updated;
-                }
-            }
-        }
-    }
-
-    // --- Generic return path ---
-    // [OPM-733] Report the NET open amount: entry fill minus Zorro-driven
-    // closes. Zorro's automatic fill-poll overwrites the trade's lot count
-    // with this return value, so echoing the gross entry fill would undo
-    // partial closes in Zorro's ledger (incident 1: TRX 61796 re-reported
-    // after reduce to 58508).
-    // [OPM-733] Sub-lot epsilon: a full close can leave a tiny positive float
-    // residual (filledSize re-derived from the exchange as a sum of fills vs
-    // separately-accumulated closedSize). Without this, net rounds to 0 lots
-    // but the `:1` floor below would return a phantom 1-lot trade -> reconcile
-    // mismatch, the exact symptom OPM-733 prevents.
-    double openSize = state.filledSize - state.closedSize;
-    const double lotEps = (hl::g_trading.lotSize > 0)
-        ? hl::g_trading.lotSize * 0.5 : 1e-9;
-    if (openSize < lotEps) openSize = 0;
-
-    if (pOpen) *pOpen = state.avgPrice;
-    if (pRoll) *pRoll = 0;
-
-    if (pProfit && state.avgPrice > 0 && openSize > 0) {
-        hl::PriceData price = hl::market::getPrice(state.coin);
-        double currentPx = price.mid > 0 ? price.mid : price.ask;
-
-        if (currentPx > 0) {
-            double pnl = (currentPx - state.avgPrice) * openSize;
-            if (state.side == hl::OrderSide::Sell) pnl = -pnl;
-            *pProfit = pnl;
-        }
-    }
-
-    if (state.status == hl::OrderStatus::Cancelled) {
-        return NAY - 1;
-    }
-
-    if (openSize > 0) {
-        int fillLots = (hl::g_trading.lotSize > 0)
-            ? (int)round(openSize / hl::g_trading.lotSize)
-            : (int)round(openSize);
-        return (fillLots > 0) ? fillLots : 1;
-    }
-
-    return 0;  // Pending order, or entry fully closed by Zorro
-}

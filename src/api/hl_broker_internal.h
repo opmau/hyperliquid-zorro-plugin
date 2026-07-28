@@ -55,6 +55,8 @@
 #include "../foundation/hl_utils.h"
 #include "../services/hl_market_service.h"
 #include "../services/hl_trading_service.h"
+#include "../services/hl_trading_response.h"
+#include "../services/hl_trading_openorders.h"
 #include "../services/hl_account_service.h"
 #include "../services/hl_meta.h"
 #include "../transport/ws_manager.h"
@@ -62,12 +64,13 @@
 
 // Plugin identification
 #define PLUGIN_TYPE 2
+// Keep in step with project(... VERSION ...) in CMakeLists.txt and CHANGELOG.md.
 #ifdef DEV_BUILD
   #define PLUGIN_NAME "Hyperliquid-DEV"
-  #define PLUGIN_VERSION "2.0.0-DEV"
+  #define PLUGIN_VERSION "2.1.0-DEV"
 #else
   #define PLUGIN_NAME "Hyperliquid"
-  #define PLUGIN_VERSION "2.0.0-Modular"
+  #define PLUGIN_VERSION "2.1.0"
 #endif
 
 // Compile-time build stamp — changes on every recompile, so the BrokerLogin
@@ -83,6 +86,7 @@
 #define HL_SET_ORDER_TYPE   50012
 #define HL_GET_OPEN_ORDERS  50020
 #define HL_SET_ACCOUNT_MODE 50021
+#define HL_GET_LAST_ORDER_ERROR 50023  // Class of last order reject; optional char[256] out [OPM-795]
 #define HL_EXPORT_ASSETS    50001
 #define HL_EXPORT_META      50002
 #define HL_EXPORT_ACCOUNT   50003
@@ -93,6 +97,8 @@
 #define HL_CANCEL_TWAP         50041  // Cancel TWAP order: param=twapId [OPM-81]
 #define HL_MODIFY_ORDER        50042  // Atomic order modify: param=ModifyRequest* [OPM-80]
 #define HL_PLACE_BRACKET       50043  // Bracket order: param=BracketRequest* [OPM-79]
+#define HL_MODIFY_BY_TRADEID   50044  // Reprice by trade ID: param=double[3]
+                                      // {tradeId, newPrice, newSize} [OPM-793]
 
 // Zorro runtime function pointer (defined in hl_broker.cpp, used by BrokerAccount)
 extern "C" { extern int (*nap)(int); }
@@ -110,3 +116,15 @@ void zorroQuit(const char* reason);  // Halt strategy like pressing [Stop]
 
 // BrokerCommand handler (defined in hl_broker_commands.cpp)
 double handleBrokerCommand(int mode, intptr_t parameter);
+
+// Hyperliquid-specific command handler for the 500xx range
+// (defined in hl_broker_commands_hl.cpp; called from handleBrokerCommand's
+// default branch). Returns 0 for modes it does not recognize.
+double handleHyperliquidCommand(int mode, intptr_t parameter);
+
+// Position-accounting helpers shared by the execution and query trade modules
+// (defined in hl_broker_trade.cpp, used by hl_broker_trade_query.cpp).
+// See the definitions for the OPM-680/OPM-733 reasoning they encode.
+bool hasOtherSameSideTracker(int excludeTradeId, const char* coin,
+                             hl::OrderSide side);
+void recordZorroClose(int tradeId, hl::OrderState& state, double closeSz);

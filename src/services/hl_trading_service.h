@@ -64,8 +64,8 @@ bool cancelOrder(const char* coin, const char* oid);
 bool cancelOrderByTradeId(int tradeId);
 
 /// Cancel all open orders for a coin (or all coins if nullptr)
-/// @param coin Asset name, or nullptr for all
-/// @return Number of cancellation requests sent
+/// @param coin Asset name in API form ("BTC", "xyz:TSLA"), or nullptr for all
+/// @return Number of orders successfully cancelled
 int cancelAllOrders(const char* coin = nullptr);
 
 // =============================================================================
@@ -176,7 +176,7 @@ bool clearScheduleCancel();
 // =============================================================================
 
 /// Set the order type for new orders
-/// @param orderType "Ioc", "Gtc", or "Alo"
+/// @param orderType "Ioc", "Gtc", or "Alo" (any casing; stored canonicalized)
 void setOrderType(const char* orderType);
 
 /// Get current order type
