@@ -76,6 +76,7 @@ add_library(hl_services STATIC
     src/services/hl_market_service.cpp
     src/services/hl_trading_service.cpp
     src/services/hl_trading_cancel.cpp
+    src/services/hl_trading_lookup.cpp
     src/services/hl_trading_response.cpp
     src/services/hl_trading_openorders.cpp
     src/services/hl_trading_twap.cpp

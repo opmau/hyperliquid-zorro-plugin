@@ -421,6 +421,29 @@ TEST_CASE(cr6_guards_unchanged) {
     ASSERT_EQ(0.0, roundPriceForExchange(1e15, 4));
 }
 
+TEST_CASE(cr6_positive_price_never_rounds_to_zero) {
+    // A positive price must never become "p":"0" on the wire. When an asset
+    // allows no decimal places (szDecimals >= maxDecimals forces the integer
+    // grid), flooring a sub-$1 buy would otherwise yield 0.
+    //
+    // Not reachable on any live perp today — max szDecimals across HL's 232
+    // perps is 5, so maxDecPlaces >= 1 — but assets are listed continuously and
+    // the failure would be silent, so the guard is load-bearing.
+    const int szDecs[] = {6, 7, 8};
+    const double prices[] = {0.5, 0.00012, 0.9999};
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            ASSERT_TRUE(roundPriceForExchange(prices[j], szDecs[i], 6, PriceRound::Down) > 0);
+            ASSERT_TRUE(roundPriceForExchange(prices[j], szDecs[i], 6, PriceRound::Up) > 0);
+            ASSERT_TRUE(roundPriceForExchange(prices[j], szDecs[i], 6, PriceRound::Nearest) > 0);
+        }
+    }
+
+    // The guard must not perturb prices that are already representable.
+    ASSERT_FLOAT_EQ(roundPriceForExchange(0.5, 4, 6, PriceRound::Down), 0.5);
+    ASSERT_FLOAT_EQ(roundPriceForExchange(0.5, 4, 6, PriceRound::Up), 0.5);
+}
+
 TEST_CASE(cr6_format_price_uses_the_side) {
     ASSERT_STREQ("123456", formatPriceForExchange(123456.0, 4, 6, PriceRound::Down).c_str());
     ASSERT_STREQ("1234.5", formatPriceForExchange(1234.56, 4, 6, PriceRound::Down).c_str());
@@ -656,6 +679,7 @@ int main() {
     RUN_TEST(cr6_five_sig_fig_rule_still_enforced_below_100k);
     RUN_TEST(cr6_decimal_limit_still_enforced);
     RUN_TEST(cr6_guards_unchanged);
+    RUN_TEST(cr6_positive_price_never_rounds_to_zero);
     RUN_TEST(cr6_format_price_uses_the_side);
 
     printf("\n--- CR-2 (OPM-792): honest close reporting ---\n");

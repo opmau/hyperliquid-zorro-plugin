@@ -250,7 +250,18 @@ double roundPriceForExchange(double price, int szDecimals, int maxDecimals,
     // Multiplying back reintroduces binary noise (e.g. 12346 * 0.1 =
     // 1234.6000000000001); clamp to the decimal budget to keep the wire string
     // canonical. Integer results are unaffected.
-    return roundToDecimals(q * step, maxDecPlaces);
+    double result = roundToDecimals(q * step, maxDecPlaces);
+
+    // A positive price must never round to zero — that would put "p":"0" on the
+    // wire. Reachable when the asset allows no decimal places (szDecimals >=
+    // maxDecimals, forcing the integer grid) and the price is below the first
+    // grid point: flooring 0.5 to the integer grid yields 0. No live perp hits
+    // this today (max szDecimals across HL's 232 perps is 5, so maxDecPlaces >=
+    // 1), but assets are listed continuously and the failure is silent, so we
+    // clamp to the smallest representable positive price instead.
+    if (result <= 0.0) return step;
+
+    return result;
 }
 
 std::string formatPriceForExchange(double price, int szDecimals, int maxDecimals,
