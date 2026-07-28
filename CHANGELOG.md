@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.1.0] — 2026-07-27
+## [2.1.0] — 2026-07-28
 
 Makes ALO (post-only / add-liquidity-only) execution actually reachable from a
 Zorro strategy. **No ALO order had ever reached the exchange from this stack**:
