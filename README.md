@@ -18,10 +18,16 @@ A broker plugin that connects the [Zorro](https://zorro-project.com/) algorithmi
 ## Features
 
 - **Perpetual futures trading** on Hyperliquid L1 (spot and HIP-3 support is planned — see [Status](#status))
+- **Maker / post-only (ALO) execution** — place, reprice and cancel resting orders, with post-only rejects reported back to the strategy so it can requote instead of guessing
 - **Real-time market data** via WebSocket (l2Book, allMids)
 - **HTTP fallback** when the WebSocket is unhealthy
 - **Native EIP-712 order signing** (no external signer process)
 - **Position and order management** through Zorro's broker interface
+- **Atomic order modify** via Hyperliquid's queue-priority-preserving `batchModify`, callable from Lite-C
+- **Advanced order types** — TWAP, bracket (TP/SL), trigger/stop orders, and a `scheduleCancel` dead-man's switch
+
+See [docs/BROKERCOMMAND_REFERENCE.md](docs/BROKERCOMMAND_REFERENCE.md) for every
+`brokerCommand` mode and the strategy-facing behaviour contracts.
 
 ## Architecture
 
@@ -179,6 +185,7 @@ build/           CMake helper scripts
 
 ## Documentation
 
+- [docs/BROKERCOMMAND_REFERENCE.md](docs/BROKERCOMMAND_REFERENCE.md) — every `brokerCommand` mode, and the behaviour contracts a strategy must design against
 - [docs/dev/ARCHITECTURE.md](docs/dev/ARCHITECTURE.md) — layered design and dependency rules
 - [docs/dev/GETTING_STARTED.md](docs/dev/GETTING_STARTED.md) — developer onboarding
 - [docs/dev/TESTING.md](docs/dev/TESTING.md) — test strategy and how to run tests
@@ -193,7 +200,8 @@ build/           CMake helper scripts
 Under active development. Currently supports:
 
 - Perpetual futures (spot and HIP-3 are architecturally supported but not yet enabled)
-- Market and limit orders
+- Market, limit and post-only (ALO) orders; TWAP, bracket and trigger orders
+- Order reprice (atomic modify), targeted and bulk cancel
 - Position queries and account info
 - Real-time price streaming
 
