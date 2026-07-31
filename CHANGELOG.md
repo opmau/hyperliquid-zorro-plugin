@@ -22,10 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which already includes unrealized PnL from every perp dex.
 
   **This raises the balance Zorro sees, so a strategy sizing from `Balance` or
-  `Equity` will trade larger.** Check your position sizing before deploying.
-  Two live examples: an account with 10 open positions went from 15,372 to
-  24,114 (+57%), and an account funded entirely on the spot side went from `0`
-  to its true 806.55.
+  `Equity` will trade larger.** Check your position sizing before deploying. The
+  size of the change depends on how your collateral is held: an account running
+  perps against a shared spot pool can see reported equity rise substantially,
+  and an account funded entirely on the spot side moves from `0` to its full
+  spot balance.
 
   A balance of `0` also used to trigger the zero-balance guard, which halts the
   strategy with a message blaming the wallet address — so a correctly configured

@@ -221,15 +221,15 @@ TEST_CASE(ws_getbalance_with_spot_usdc_unified) {
 }
 
 TEST_CASE(ws_getbalance_unified_zero_perps_still_reports_equity) {
-    // [OPM-824] The testnet halt case: perps accountValue is 0 while the
-    // account holds 806.55 USDC of usable collateral on the spot side.
+    // [OPM-824] The halt case: perps accountValue is 0 while the account
+    // holds usable collateral on the spot side.
     ws::PriceCache cache;
     cache.setAccountData(0.0, 0.0, 0.0, 0.0);
-    cache.setSpotState(806.550306, 806.550306, true);
+    cache.setSpotState(1234.567890, 1234.567890, true);
 
     AcctWs::Balance bal = AcctWs::getBalance(cache, true, 60000);
     ASSERT_TRUE(bal.dataReceived);
-    ASSERT_FLOAT_EQ_TOL(bal.accountValue, 806.550306, 1e-6);
+    ASSERT_FLOAT_EQ_TOL(bal.accountValue, 1234.567890, 1e-6);
 }
 
 TEST_CASE(ws_getbalance_no_spot_snapshot_falls_back_to_perps) {
