@@ -265,8 +265,7 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
     // [OPM-733] Report the NET open amount: entry fill minus Zorro-driven
     // closes. Zorro's automatic fill-poll overwrites the trade's lot count
     // with this return value, so echoing the gross entry fill would undo
-    // partial closes in Zorro's ledger (incident 1: TRX 61796 re-reported
-    // after reduce to 58508).
+    // partial closes in Zorro's ledger, undoing a partial reduce.
     // [OPM-733] Sub-lot epsilon: a full close can leave a tiny positive float
     // residual (filledSize re-derived from the exchange as a sum of fills vs
     // separately-accumulated closedSize). Without this, net rounds to 0 lots

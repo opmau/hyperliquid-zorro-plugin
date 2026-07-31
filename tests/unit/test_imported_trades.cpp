@@ -418,15 +418,15 @@ void test_OPM680_import_then_same_side_extend() {
     ASSERT_FLOAT_NE(importedShare, buggy);
 }
 
-void test_OPM680_yolo_xrp_scenario() {
+void test_OPM680_extend_preserves_imported_share() {
     TradeTracker::reset();
-    TradeTracker::importTrade("IMPORTED_S00011", "XRP", false, 2927.0, 1.37409);
-    TradeTracker::setCurrentPosition("XRP", -2927.0, 1.37409);
+    TradeTracker::importTrade("IMPORTED_S00011", "XRP", false, 3000.0, 1.25000);
+    TradeTracker::setCurrentPosition("XRP", -3000.0, 1.25000);
 
-    TradeTracker::brokerBuy2Extend("S00042", "XRP", false, 4815.0);
+    TradeTracker::brokerBuy2Extend("S00042", "XRP", false, 5000.0);
 
-    ASSERT_FLOAT_EQ_TOL(TradeTracker::getImportedTradeSize("IMPORTED_S00011"), 2927.0, 1e-6);
-    ASSERT_FLOAT_EQ_TOL(TradeTracker::getImportedTradeSize_PRE_OPM680("IMPORTED_S00011"), 7742.0, 1e-6);
+    ASSERT_FLOAT_EQ_TOL(TradeTracker::getImportedTradeSize("IMPORTED_S00011"), 3000.0, 1e-6);
+    ASSERT_FLOAT_EQ_TOL(TradeTracker::getImportedTradeSize_PRE_OPM680("IMPORTED_S00011"), 8000.0, 1e-6);
 }
 
 void test_OPM680_extend_then_cover_imported() {
@@ -481,62 +481,61 @@ void test_OPM680_external_close_before_extend_captured_by_snapshot() {
 //=============================================================================
 
 void test_OPM733_double_extend_keeps_imported_share() {
-    // OPM-733 incident 2 (ADA, observed in live trading): bootstrap import,
+    // OPM-733 second failure mode: bootstrap import,
     // then same-side EXTENDs on two consecutive daily rebalances. The 2nd
     // extend's pre-extend snapshot ran while ALREADY in multi-tracker mode and
-    // absorbed extend #1's fill into the IMPORTED_ share (81910 -> 87741).
-    // Zorro's fill-poll then inflated its ledger by exactly 5831, failing the
-    // strategy reconcile ($985 > $500 HALT) on every subsequent rebalance.
+    // absorbed extend #1's fill into the IMPORTED_ share.
+    // Zorro's fill-poll then inflated its ledger by exactly extend #1's size,
+    // tripping the strategy's trade-reconciliation guard on every rebalance.
     // The snapshot must only run on the sole->multi transition.
     TradeTracker::reset();
-    TradeTracker::importTrade("IMPORTED_S00002", "ADA", false, 81910.0, 0.222316);
-    TradeTracker::setCurrentPosition("ADA", -81910.0, 0.222316);
+    TradeTracker::importTrade("IMPORTED_S00002", "ADA", false, 80000.0, 0.220000);
+    TradeTracker::setCurrentPosition("ADA", -80000.0, 0.220000);
 
-    TradeTracker::brokerBuy2Extend("S00035", "ADA", false, 5831.0);   // live -87741
-    TradeTracker::brokerBuy2Extend("S00084", "ADA", false, 11556.0);  // live -99297
+    TradeTracker::brokerBuy2Extend("S00035", "ADA", false, 6000.0);   // live -86000
+    TradeTracker::brokerBuy2Extend("S00084", "ADA", false, 12000.0);  // live -98000
 
     double importedShare = TradeTracker::getImportedTradeSize("IMPORTED_S00002");
-    ASSERT_FLOAT_EQ_TOL(importedShare, 81910.0, 1e-6);
+    ASSERT_FLOAT_EQ_TOL(importedShare, 80000.0, 1e-6);
 
     // Ledger sum (imported share + both extends) must equal live aggregate
-    double ledgerSum = importedShare + 5831.0 + 11556.0;
-    ASSERT_FLOAT_EQ_TOL(ledgerSum, 99297.0, 1e-6);
+    double ledgerSum = importedShare + 6000.0 + 12000.0;
+    ASSERT_FLOAT_EQ_TOL(ledgerSum, 98000.0, 1e-6);
 }
 
 void test_OPM733_triple_extend_keeps_imported_share() {
     // Share must stay pinned across ANY number of subsequent extends.
     TradeTracker::reset();
-    TradeTracker::importTrade("IMPORTED_S00002", "ADA", false, 81910.0, 0.222316);
-    TradeTracker::setCurrentPosition("ADA", -81910.0, 0.222316);
+    TradeTracker::importTrade("IMPORTED_S00002", "ADA", false, 80000.0, 0.220000);
+    TradeTracker::setCurrentPosition("ADA", -80000.0, 0.220000);
 
-    TradeTracker::brokerBuy2Extend("S00035", "ADA", false, 5831.0);
-    TradeTracker::brokerBuy2Extend("S00084", "ADA", false, 11556.0);
+    TradeTracker::brokerBuy2Extend("S00035", "ADA", false, 6000.0);
+    TradeTracker::brokerBuy2Extend("S00084", "ADA", false, 12000.0);
     TradeTracker::brokerBuy2Extend("S00099", "ADA", false, 1000.0);
 
-    ASSERT_FLOAT_EQ_TOL(TradeTracker::getImportedTradeSize("IMPORTED_S00002"), 81910.0, 1e-6);
+    ASSERT_FLOAT_EQ_TOL(TradeTracker::getImportedTradeSize("IMPORTED_S00002"), 80000.0, 1e-6);
 }
 
 void test_OPM733_regular_partial_close_reports_net() {
-    // OPM-733 incident 1 (TRX, observed in live trading): a mapped trade
-    // (real oid) is partially closed via BrokerSell2 (61796 -> 58508 open).
-    // BrokerTrade's fill-poll then re-reported the entry order's gross fill
-    // (61796), and Zorro wrote it back into the ledger ("filled 61796 of
-    // 58508"). BrokerTrade must report the NET open amount: entry fill minus
-    // Zorro-driven closes.
+    // OPM-733 first failure mode: a mapped trade with a real exchange oid is
+    // partially closed via BrokerSell2, leaving a smaller net open. The
+    // fill-poll re-reported the entry order's GROSS fill and Zorro wrote that
+    // back into its ledger, undoing the close. BrokerTrade must report the NET
+    // open amount: entry fill minus Zorro-driven closes.
     TradeTracker::reset();
-    TradeTracker::brokerBuy2Extend("L00034", "TRX", true, 61796.0);  // live 61796
+    TradeTracker::brokerBuy2Extend("L00034", "TRX", true, 60000.0);  // live 60000
 
-    TradeTracker::coverRegularTrade("L00034", 3288.0);  // live 58508
+    TradeTracker::coverRegularTrade("L00034", 3000.0);  // live 57000
 
-    ASSERT_FLOAT_EQ_TOL(TradeTracker::getRegularTradeSize("L00034"), 58508.0, 1e-6);
+    ASSERT_FLOAT_EQ_TOL(TradeTracker::getRegularTradeSize("L00034"), 57000.0, 1e-6);
 }
 
 void test_OPM733_regular_full_close_reports_zero() {
     // Fully Zorro-closed mapped trade must report 0, not the gross entry fill.
     TradeTracker::reset();
-    TradeTracker::brokerBuy2Extend("L00034", "TRX", true, 61796.0);
+    TradeTracker::brokerBuy2Extend("L00034", "TRX", true, 60000.0);
 
-    TradeTracker::coverRegularTrade("L00034", 61796.0);  // live 0
+    TradeTracker::coverRegularTrade("L00034", 60000.0);  // live 0
 
     ASSERT_FLOAT_EQ_TOL(TradeTracker::getRegularTradeSize("L00034"), 0.0, 1e-6);
 }
@@ -592,7 +591,7 @@ int main() {
     RUN_TEST(multiple_assets_imported);
     RUN_TEST(unknown_order_id);
     RUN_TEST(OPM680_import_then_same_side_extend);
-    RUN_TEST(OPM680_yolo_xrp_scenario);
+    RUN_TEST(OPM680_extend_preserves_imported_share);
     RUN_TEST(OPM680_extend_then_cover_imported);
     RUN_TEST(OPM680_extend_then_full_cover_imported);
     RUN_TEST(OPM680_external_close_before_extend_captured_by_snapshot);

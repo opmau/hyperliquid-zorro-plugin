@@ -205,13 +205,11 @@ froze the daily rebalance. Validated by ~1 week of live trading before release.
   rebalance until a manual `.trd` resync:
   - Mapped trades now record Zorro-driven closes in a new `closedSize` field
     and BrokerTrade reports `filledSize - closedSize` (net open), instead of
-    re-reporting the entry order's gross fill (e.g. 61796 after a reduce to
-    58508).
+    re-reporting the entry order's gross fill, which undid a partial reduce.
   - The OPM-680 pre-extend share snapshot now runs only on the sole→multi
     tracker transition, via a shared `hasOtherSameSideTracker()` predicate
     that also backs BrokerTrade's reporting — so a second consecutive extend
-    no longer double-counts a sibling's fill into an imported trade's share
-    (81910 → 87741).
+    no longer double-counts a sibling's fill into an imported trade's share.
   - A sub-lot epsilon on the net-open size prevents a full close that leaves
     a tiny float residual from reporting a phantom 1-lot trade.
 
@@ -264,12 +262,11 @@ CI/CD (the release DLL is now built and published automatically on tag).
 - **Reconcile double-count blocked further trading after EXTEND orders** ([OPM-680]):
   `BrokerTrade`'s `IMPORTED_` branch returned the broker's live aggregate position
   size, which double-counted when a same-side `BrokerBuy2` created a new tradeID
-  alongside an existing `IMPORTED_` position. Zorro then saw e.g. `-0.30075` BTC while
-  Hyperliquid held `-0.21060`, the reconcile delta exceeded the strategy's $500 HALT
-  threshold, and every subsequent daily rebalance was skipped. Fixed with per-tradeID
-  share accounting so each tradeID reports only its own portion. Observed in live
-  trading on a daily rebalance, where two assets each drifted by exactly one prior
-  order's size.
+  alongside an existing `IMPORTED_` position. Zorro's position size then diverged
+  from Hyperliquid's by the size of the earlier order, and once that delta exceeded
+  the strategy's reconciliation tolerance every subsequent rebalance was skipped.
+  Fixed with per-tradeID share accounting so each tradeID reports only its own
+  portion.
 
 ### Added
 

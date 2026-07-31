@@ -7,11 +7,11 @@
 // The defect: BrokerAccount reported clearinghouseState.marginSummary
 // .accountValue, which is perps-only AND main-dex only. On a unified account —
 // where one spot USDC pool collateralizes everything — that under-reported
-// usable equity by ~37% on mainnet and read a flat 0 on testnet, tripping the
-// zero-balance guard and halting the strategy.
+// usable equity on accounts with a shared collateral pool, and read a flat 0
+// on an account funded entirely on the spot side, tripping the zero-balance
+// guard and halting the strategy.
 //
-// Zorro sizes positions from this number, so every payload below is a verbatim
-// (address-stripped) capture from the live API on 2026-07-31, not a mock-up.
+// Payload SHAPES below mirror the live API exactly; the values are illustrative.
 //=============================================================================
 
 #include "../test_framework.h"
@@ -22,26 +22,26 @@ using namespace hl::test;
 using namespace hl::account;
 
 //=============================================================================
-// CANNED PAYLOADS — captured live 2026-07-31
+// CANNED PAYLOADS — live response shapes, illustrative values
 //=============================================================================
 
-// unifiedAccount, mainnet. Spot USDC total IS the whole collateral pool;
-// perps accountValue for the same account read 15025.81 at capture time.
+// unifiedAccount. Spot USDC total IS the whole collateral pool; the perps
+// accountValue for the same account is a different, smaller number.
 static const char* SPOT_UNIFIED_MAINNET =
-    "{\"balances\":[{\"coin\":\"USDC\",\"token\":0,\"total\":\"23942.437016\","
-    "\"hold\":\"15130.155342\",\"entryNtl\":\"0.0\"}],"
-    "\"tokenToAvailableAfterMaintenance\":[[0,\"17397.164168\"]]}";
+    "{\"balances\":[{\"coin\":\"USDC\",\"token\":0,\"total\":\"20000.000000\","
+    "\"hold\":\"12000.000000\",\"entryNtl\":\"0.0\"}],"
+    "\"tokenToAvailableAfterMaintenance\":[[0,\"15000.000000\"]]}";
 
-// unifiedAccount, testnet. Perps accountValue is 0.0 here — the account is
+// unifiedAccount, perps accountValue 0.0 — the account is
 // funded entirely on the spot side. This is the payload that used to halt.
 static const char* SPOT_UNIFIED_TESTNET =
     "{\"balances\":[{\"coin\":\"USDC\",\"token\":0,\"total\":\"1234.567890\","
     "\"hold\":\"0.0\",\"entryNtl\":\"0.0\"}],"
     "\"tokenToAvailableAfterMaintenance\":[[0,\"1234.567890\"]]}";
 
-// "default" mode, mainnet sub-account. No tokenToAvailableAfterMaintenance.
+// "default" mode. No tokenToAvailableAfterMaintenance.
 static const char* SPOT_DEFAULT_MAINNET =
-    "{\"balances\":[{\"coin\":\"USDC\",\"token\":0,\"total\":\"0.00471007\","
+    "{\"balances\":[{\"coin\":\"USDC\",\"token\":0,\"total\":\"0.00500000\","
     "\"hold\":\"0.0\",\"entryNtl\":\"0.0\"}]}";
 
 // "disabled" mode: separate pools, meaningful spot holdings.
@@ -54,7 +54,7 @@ static const char* SPOT_DISABLED =
 // portfolioMargin: multi-collateral, so USDC is not the only token listed and
 // tokenToAvailableAfterMaintenance carries an entry per collateral token.
 static const char* SPOT_PORTFOLIO_MARGIN =
-    "{\"balances\":[{\"coin\":\"HYPE\",\"token\":150,\"total\":\"11.2094\","
+    "{\"balances\":[{\"coin\":\"HYPE\",\"token\":150,\"total\":\"10.0000\","
     "\"hold\":\"0.0\",\"entryNtl\":\"600.0\"},"
     "{\"coin\":\"USDC\",\"token\":0,\"total\":\"12500.25\",\"hold\":\"3000.0\","
     "\"entryNtl\":\"0.0\"}],"
@@ -70,8 +70,8 @@ TEST_CASE(spot_parse_unified_mainnet) {
                                             strlen(SPOT_UNIFIED_MAINNET), s));
     ASSERT_TRUE(s.valid);
     ASSERT_TRUE(s.unifiedPool);
-    ASSERT_FLOAT_EQ_TOL(s.usdcTotal, 23942.437016, 1e-6);
-    ASSERT_FLOAT_EQ_TOL(s.availAfterMaint, 17397.164168, 1e-6);
+    ASSERT_FLOAT_EQ_TOL(s.usdcTotal, 20000.000000, 1e-6);
+    ASSERT_FLOAT_EQ_TOL(s.availAfterMaint, 15000.000000, 1e-6);
 }
 
 TEST_CASE(spot_parse_unified_testnet) {
@@ -89,7 +89,7 @@ TEST_CASE(spot_parse_default_has_no_unified_marker) {
                                             strlen(SPOT_DEFAULT_MAINNET), s));
     ASSERT_TRUE(s.valid);
     ASSERT_FALSE(s.unifiedPool);
-    ASSERT_FLOAT_EQ_TOL(s.usdcTotal, 0.00471007, 1e-8);
+    ASSERT_FLOAT_EQ_TOL(s.usdcTotal, 0.00500000, 1e-8);
     ASSERT_FLOAT_EQ(s.availAfterMaint, 0.0);
 }
 
@@ -176,11 +176,11 @@ TEST_CASE(collateral_unified_uses_spot_total_alone) {
     SpotState s;
     parseSpotClearinghouseState(SPOT_UNIFIED_MAINNET, strlen(SPOT_UNIFIED_MAINNET), s);
 
-    CollateralView v = computeCollateral(15025.81, 13150.15, s);
+    CollateralView v = computeCollateral(12500.00, 10000.00, s);
     ASSERT_TRUE(v.unified);
-    // NOT 15025.81 (the old, perps-only figure) and NOT 38968.25 (the sum).
-    ASSERT_FLOAT_EQ_TOL(v.equity, 23942.437016, 1e-6);
-    ASSERT_FLOAT_EQ_TOL(v.freeCollateral, 17397.164168, 1e-6);
+    // NOT 12500.00 (the old, perps-only figure) and NOT 32500.00 (the sum).
+    ASSERT_FLOAT_EQ_TOL(v.equity, 20000.000000, 1e-6);
+    ASSERT_FLOAT_EQ_TOL(v.freeCollateral, 15000.000000, 1e-6);
 }
 
 TEST_CASE(collateral_unified_does_not_double_count_pnl) {
@@ -189,11 +189,11 @@ TEST_CASE(collateral_unified_does_not_double_count_pnl) {
     // So moving BOTH by the same amount must move equity by that amount ONCE.
     SpotState s;
     parseSpotClearinghouseState(SPOT_UNIFIED_MAINNET, strlen(SPOT_UNIFIED_MAINNET), s);
-    double before = computeCollateral(15025.81, 13150.15, s).equity;
+    double before = computeCollateral(12500.00, 10000.00, s).equity;
 
     const double pnl = 100.0;
     s.usdcTotal += pnl;
-    double after = computeCollateral(15025.81 + pnl, 13150.15, s).equity;
+    double after = computeCollateral(12500.00 + pnl, 10000.00, s).equity;
 
     ASSERT_FLOAT_EQ_TOL(after - before, pnl, 1e-9);  // once, not twice
 }
@@ -216,7 +216,7 @@ TEST_CASE(collateral_unified_ignores_perps_value_entirely) {
     parseSpotClearinghouseState(SPOT_UNIFIED_MAINNET, strlen(SPOT_UNIFIED_MAINNET), s);
 
     double a = computeCollateral(0.0,        0.0, s).equity;
-    double b = computeCollateral(15025.81,   0.0, s).equity;
+    double b = computeCollateral(12500.00,   0.0, s).equity;
     double c = computeCollateral(9999999.99, 0.0, s).equity;
     ASSERT_FLOAT_EQ_TOL(a, b, 1e-9);
     ASSERT_FLOAT_EQ_TOL(b, c, 1e-9);
@@ -238,9 +238,9 @@ TEST_CASE(collateral_default_adds_perps_and_spot) {
     SpotState s;
     parseSpotClearinghouseState(SPOT_DEFAULT_MAINNET, strlen(SPOT_DEFAULT_MAINNET), s);
 
-    CollateralView v = computeCollateral(228.634863, 0.0, s);
+    CollateralView v = computeCollateral(250.000000, 0.0, s);
     ASSERT_FALSE(v.unified);
-    ASSERT_FLOAT_EQ_TOL(v.equity, 228.634863 + 0.00471007, 1e-8);
+    ASSERT_FLOAT_EQ_TOL(v.equity, 250.000000 + 0.00500000, 1e-8);
 }
 
 TEST_CASE(collateral_disabled_adds_perps_and_spot) {
@@ -257,10 +257,10 @@ TEST_CASE(collateral_no_spot_data_falls_back_to_perps) {
     // Spot fetch failed. Under-reporting a unified account is bad; reporting 0
     // is worse — it halts the strategy. Fall back, do not zero out.
     SpotState s;  // valid = false
-    CollateralView v = computeCollateral(15025.81, 13150.15, s);
+    CollateralView v = computeCollateral(12500.00, 10000.00, s);
     ASSERT_FALSE(v.unified);
-    ASSERT_FLOAT_EQ_TOL(v.equity, 15025.81, 1e-9);
-    ASSERT_FLOAT_EQ_TOL(v.freeCollateral, 1875.66, 1e-9);
+    ASSERT_FLOAT_EQ_TOL(v.equity, 12500.00, 1e-9);
+    ASSERT_FLOAT_EQ_TOL(v.freeCollateral, 2500.00, 1e-9);
 }
 
 TEST_CASE(collateral_unified_with_zero_spot_reports_zero) {
