@@ -53,10 +53,10 @@ would be a guaranteed reject.
 
 | Mode | Parameter | Returns | Notes |
 |------|-----------|---------|-------|
-| `GET_COMPLIANCE` (53) | — | `0` | Defers to the `NFA` column in `Accounts.csv` |
-| `GET_MAXREQUESTS` (44) | — | `5` | Max concurrent HTTP requests |
-| `GET_MAXTICKS` (40) | — | `5000` | Candles per history request |
-| `GET_BROKERZONE` (41) | — | `0` | Hyperliquid timestamps are UTC |
+| `GET_COMPLIANCE` (51) | — | `0` | Defers to the `NFA` column in `Accounts.csv` |
+| `GET_MAXREQUESTS` (45) | — | `5` | Max concurrent HTTP requests |
+| `GET_MAXTICKS` (43) | — | `5000` | Candles per history request |
+| `GET_BROKERZONE` (40) | — | `0` | Hyperliquid timestamps are UTC |
 | `GET_VOLUME` (61) | — | `1` | Signals tick activity exists |
 | `GET_PRICETYPE` (150) | — | `2` | Plugin returns bid/ask, not traded prices |
 | `SET_DIAGNOSTICS` (138) | level `int` | `1` | 0=off, 1=errors, 2=info, 3=verbose |
@@ -64,12 +64,12 @@ would be a guaranteed reject.
 | `SET_SYMBOL` (132) | symbol `string` | `1` | Sets the asset context for `GET_PRICE`, `GET_POSITION`, `DO_CANCEL(0)` |
 | `SET_ORDERTYPE` (157) | `0`/`2`/`4` (+`8`) | echo | `0`→Ioc, `2`→Gtc, `4`→Alo (sticky). `+8` = protective stop. `1`/`3` (AON) unsupported → `0` |
 | `SET_HWND` (172) | `HWND` | `1` | |
-| `GET_PRICE` (33) | `4`=mid, `5`=ask, `6`=bid | price | Per-asset; requires `SET_SYMBOL`. Hard `0.0` when no data |
-| `GET_POSITION` (34) | symbol `string` | net size | Cheap cached read, safe to poll |
-| `GET_POSITION` (34) | `0` | `1` | **Destructive** — rebuilds all positions from the broker |
-| `GET_TRADES` (82) | `TRADE*` | count | Imports broker positions into Zorro |
-| `DO_CANCEL` (108) | trade ID | `1`/`0` | Cancels that order. If a resting **close** order exists for the position, cancels that instead of the filled entry |
-| `DO_CANCEL` (108) | `0` | count | Cancels every resting order for the current `SET_SYMBOL`, or account-wide if none is set |
+| `GET_PRICE` (60) | `4`=mid, `5`=ask, `6`=bid | price | Per-asset; requires `SET_SYMBOL`. Hard `0.0` when no data |
+| `GET_POSITION` (53) | symbol `string` | net size | Cheap cached read, safe to poll |
+| `GET_POSITION` (53) | `0` | `1` | **Destructive** — rebuilds all positions from the broker |
+| `GET_TRADES` (71) | `TRADE*` | count | Imports broker positions into Zorro |
+| `DO_CANCEL` (301) | trade ID | `1`/`0` | Cancels that order. If a resting **close** order exists for the position, cancels that instead of the filled entry |
+| `DO_CANCEL` (301) | `0` | count | Cancels every resting order for the current `SET_SYMBOL`, or account-wide if none is set |
 
 ---
 

@@ -228,22 +228,25 @@ DLLFUNC double BrokerCommand(int Command, intptr_t Parameter);
 
 ### Standard Zorro Commands
 
+Codes are those defined in the Zorro SDK header `include/trading.h`.
+
 | Command | Code | Returns | Notes |
 |---------|------|---------|-------|
-| `GET_COMPLIANCE` | 19 | `0` | Returns 0; NFA mode controlled by Accounts.csv |
-| `GET_MAXREQUESTS` | 16 | `5` | Max concurrent HTTP requests |
-| `GET_MAXTICKS` | 108 | `5000` | Hyperliquid candleSnapshot limit |
-| `GET_BROKERZONE` | 700 | `0` | UTC (no timezone offset) |
-| `GET_PRICETYPE` | 4 | `2` | Returns bid/ask prices |
-| `SET_DIAGNOSTICS` | 20 | 0 | Sets `g_config.diagLevel` |
-| `SET_AMOUNT` | 131 | 0 | Sets `g_trading.lotSize` |
-| `SET_ORDERTYPE` | 23 | 0 | Maps Zorro types: 0->IOC, 2->GTC, 4->ALO. Bit 8 sets `stopOrderPending` |
-| `SET_SYMBOL` | 3 | 0 | Sets `g_trading.priceSymbol` for `GET_PRICE` context isolation |
-| `SET_HWND` | 127 | 0 | Stores Zorro window handle for WS message routing |
-| `GET_PRICE` | 3 | price | Reads from PriceCache using `priceSymbol` |
-| `GET_POSITION` | 132 | lots | Per-symbol position, or rebuilds all positions if param=0 |
-| `GET_TRADES` | 127 | count | Fills `TRADE[]` array from live positions |
-| `DO_CANCEL` | 72 | 1/0 | Cancels order by trade ID |
+| `GET_BROKERZONE` | 40 | `0` | UTC (no timezone offset) |
+| `GET_MAXTICKS` | 43 | `5000` | Hyperliquid candleSnapshot limit |
+| `GET_MAXREQUESTS` | 45 | `5` | Max concurrent HTTP requests |
+| `GET_COMPLIANCE` | 51 | `0` | Returns 0; NFA mode controlled by Accounts.csv |
+| `GET_POSITION` | 53 | lots | Per-symbol position, or rebuilds all positions if param=0 |
+| `GET_PRICE` | 60 | price | Reads from PriceCache using `priceSymbol` |
+| `GET_VOLUME` | 61 | `1` | Signals that tick activity exists |
+| `GET_TRADES` | 71 | count | Fills `TRADE[]` array from live positions |
+| `SET_SYMBOL` | 132 | `1` | Sets `g_trading.priceSymbol` for `GET_PRICE` context isolation |
+| `SET_DIAGNOSTICS` | 138 | `1` | Sets `g_config.diagLevel` |
+| `SET_AMOUNT` | 139 | `1` | Sets `g_trading.lotSize` |
+| `GET_PRICETYPE` | 150 | `2` | Returns bid/ask prices |
+| `SET_ORDERTYPE` | 157 | echo | Maps Zorro types: 0->IOC, 2->GTC, 4->ALO. Bit 8 sets `stopOrderPending`. Returns the accepted type (`1` when 0 was passed), or `0` for the unsupported AON variants |
+| `SET_HWND` | 172 | `1` | Stores Zorro window handle for WS message routing |
+| `DO_CANCEL` | 301 | 1/0 | Cancels order by trade ID |
 
 ### Custom Plugin Commands
 

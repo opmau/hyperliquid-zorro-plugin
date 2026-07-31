@@ -148,8 +148,15 @@ copy build_vcpkg\Release\Hyperliquid.dll "C:\Zorro\Plugin\"
 2. Enter your **master account address** in the User field.
 3. Enter your **API/agent wallet private key** in the Password field
    (prefer an [agent wallet](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/nonces-and-api-wallets) over your master key).
-4. **Use testnet first** — select a testnet account so trades go to
-   `api.hyperliquid-testnet.xyz` before risking real funds.
+4. **Use testnet first.** The network is chosen by Zorro's account type, not by
+   any plugin setting. Zorro passes the type to `BrokerLogin`, and only `"Real"`
+   selects mainnet (`api.hyperliquid.xyz`); anything else — including no type at
+   all — connects to `api.hyperliquid-testnet.xyz`. In Zorro's account list
+   (`History/Accounts.csv`), the `Real` column controls this: `0` for testnet,
+   `1` for live trading.
+
+   Confirm it before sending an order: the plugin logs `Demo mode on TESTNET` or
+   `LIVE TRADING on MAINNET` at login.
 
 ## Testing
 

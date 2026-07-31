@@ -643,7 +643,7 @@ TEST_CASE(cr8_open_order_unaffected_by_the_reorder) {
 //   "When always_place = false the new order must be a non-trigger order, and
 //    must have TIF = ALO or a non-executable order with TIF = GTC. In the
 //    latter case, TIF of the new order is overridden to ALO."
-//     -- docs/hyperliquid-api/06-exchange-endpoint.md
+//     -- Hyperliquid exchange-endpoint docs, batchModify
 //
 // So IOC is rejected by the exchange unconditionally. 50044 hardcodes ALO, but
 // 50042 (HL_MODIFY_ORDER) forwards a caller-supplied TIF whose struct default
