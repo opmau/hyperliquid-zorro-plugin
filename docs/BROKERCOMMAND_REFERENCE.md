@@ -175,6 +175,14 @@ close order (reduce-only), not the filled entry.
 | 50002 | `HL_EXPORT_META` | path `string` | Assets written |
 | 50003 | `HL_EXPORT_ACCOUNT` | path `string` | `1` |
 
+`50003` writes a single-row `Accounts.csv` template from the current connection.
+Its `NFA` column is emitted as `0` ("no restrictions") and is yours to set — the
+column is Zorro's account-compliance bitfield (`1` no partial closing, `2` no
+hedging, `4` FIFO, `8` no closing of trades, `14`/`15` full NFA compliance), and
+Zorro never passes it to the plugin. Choose it in `Accounts.csv`, or in the
+strategy via `set(NFA)` and `Hedge`. Note that `14`/`15` switch Zorro's close
+path from `BrokerSell2` to `BrokerBuy2(StopDist=-1)`.
+
 ### Debug
 
 | Code | Name | Parameter | Returns |

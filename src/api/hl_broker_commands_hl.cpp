@@ -357,14 +357,17 @@ double handleHyperliquidCommand(int mode, intptr_t parameter) {
             "Hyperliquid.dll";
 #endif
 
+        // NFA column stays neutral: it is the user's compliance setting, made in
+        // Accounts.csv or via set(NFA)/Hedge in the script. [OPM-801]
         fprintf(f, "Name,Server,AccountId,User,Pass,Assets,CCY,Real,NFA,Plugin\n");
-        fprintf(f, "%s,%s,%s,%s,%s,AssetsHyperliquid,USD,%d,2,%s\n",
+        fprintf(f, "%s,%s,%s,%s,%s,AssetsHyperliquid,USD,%d,%d,%s\n",
                 PLUGIN_NAME,
                 hl::g_config.baseUrl[0] ? hl::g_config.baseUrl : "https://api.hyperliquid.xyz",
                 hl::g_config.walletAddress[0] ? hl::g_config.walletAddress : "0",
                 hl::g_config.walletAddress[0] ? hl::g_config.walletAddress : "0",
                 hl::g_config.privateKey[0] ? hl::g_config.privateKey : "0",
                 hl::g_config.isTestnet ? 0 : 1,
+                hl::config::EXPORT_ACCOUNT_NFA,
                 dllName);
 
         fclose(f);
