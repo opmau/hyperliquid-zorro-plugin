@@ -90,9 +90,10 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         // [OPM-791] Zorro auto-calls SET_ORDERTYPE at every order entry and can
         // only derive 0/1/2/3 from TradeMode — it can never send 4 (ALO). So a
         // script's brokerCommand(50012,"Alo") was reliably clobbered back to
-        // "Ioc" microseconds before the order was built. That is why all 148
-        // live orders in YOLO_HL_Native_V2_real.log went out tif:"Ioc" despite
-        // the strategy requesting ALO since February.
+        // "Ioc" microseconds before the order was built. In live trading this
+        // meant every order went out tif:"Ioc" even when the strategy had
+        // explicitly requested ALO, so no post-only order ever reached the
+        // exchange.
         //
         // While the sticky override is active we keep the script's choice and
         // still consume the +8 STOP flag above. Cleared by 50012("Ioc"/"Gtc")

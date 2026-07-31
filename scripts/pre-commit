@@ -1,22 +1,44 @@
 #!/bin/bash
 #=============================================================================
-# pre-commit hook - Run unit tests before every commit
+# pre-commit hook - Guard the public repository, then run unit tests
 #=============================================================================
 # Install with: scripts/install_hooks.bat
 # Or manually: cp scripts/pre-commit .git/hooks/pre-commit
 #
-# This hook ensures that known-bad code patterns cannot be committed.
-# Specifically:
+# This hook ensures that known-bad content cannot be committed:
+#   - Private material in a public repo (developer paths, key material, and
+#     any term listed in the untracked .private-terms deny list)
 #   - PIP/PIPCost formula errors (caused million-dollar profit displays)
 #   - Multi-asset position parsing bugs (caused wrong trade decisions)
 #   - Lot sizing errors (caused order rejections)
 #=============================================================================
 
-echo "=== Pre-Commit Hook: Running Unit Tests ==="
-echo ""
-
 # Get the root directory of the repository
 REPO_ROOT=$(git rev-parse --show-toplevel)
+
+echo "=== Pre-Commit Hook: Public-Safety Scan ==="
+echo ""
+
+PYTHON=$(command -v python || command -v python3)
+if [ -z "$PYTHON" ]; then
+    echo "WARNING: python not found - skipping the public-safety scan."
+    echo "         Install Python so private material cannot reach the public repo."
+else
+    "$PYTHON" "$REPO_ROOT/scripts/check_public_safety.py" --staged
+    if [ $? -ne 0 ]; then
+        echo "=== COMMIT BLOCKED ==="
+        echo "This repository is public. Resolve the findings above before committing."
+        echo ""
+        echo "To bypass (NOT RECOMMENDED): git commit --no-verify"
+        echo ""
+        exit 1
+    fi
+    echo "No private material staged."
+fi
+
+echo ""
+echo "=== Pre-Commit Hook: Running Unit Tests ==="
+echo ""
 
 # Run the test suite (Windows batch file)
 # Use cmd.exe to run the batch file from Git Bash

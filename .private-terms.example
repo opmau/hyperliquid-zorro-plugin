@@ -1,0 +1,25 @@
+# Template for .private-terms -- copy to `.private-terms` and fill in.
+#
+# `scripts/check_public_safety.py` reads `.private-terms` and blocks any commit
+# whose staged content matches one of these patterns. This repository is public,
+# so anything identifying a private trading environment must never be committed
+# -- including in code comments, test fixtures, and documentation.
+#
+# `.private-terms` is gitignored on purpose. Keep your real terms there, never
+# in this example file, which IS tracked and public.
+#
+# Format: one Python regular expression per line. Blank lines and lines
+# beginning with '#' are ignored.
+
+# Names of the strategies you run against this plugin, and their log files.
+# MyStrategyName[_A-Za-z0-9]*
+
+# Account names from your Zorro account list.
+# MyAccountName
+
+# Absolute paths to your private log or data directories.
+# MyBroker[\\/]+Log[\\/]+
+
+# Wallet addresses that identify your accounts. These are public on-chain, but
+# publishing them here links this repository to your trading account.
+# 0x0000000000000000000000000000000000000000

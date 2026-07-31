@@ -4,7 +4,7 @@ analyze_parallel.py — cross-reference HL WS cadence CSV with plugin stale-age 
 
 Inputs:
   --csv           parallel_run.csv from hl_ws_cadence.py
-  --log           Zorro plugin log (e.g. YOLO_HL_Native_real.log)
+  --log           Zorro plugin log for the strategy under investigation
   --window-start  parallel-window start in seconds since script start
                   (i.e. when Zorro began running, relative to Python script start)
   --window-end    parallel-window end in seconds since script start

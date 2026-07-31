@@ -401,7 +401,7 @@ void test_unknown_order_id() {
 //=============================================================================
 
 void test_OPM680_import_then_same_side_extend() {
-    // YOLO BTC scenario: IMPORTED_ 12045 short + new BrokerBuy2 9015 short.
+    // BTC scenario: IMPORTED_ 12045 short + new BrokerBuy2 9015 short.
     // Sum must equal 21060 live, not 30075.
     TradeTracker::reset();
     TradeTracker::importTrade("IMPORTED_S00005", "BTC", false, 12045.0, 77916.50);
@@ -481,7 +481,7 @@ void test_OPM680_external_close_before_extend_captured_by_snapshot() {
 //=============================================================================
 
 void test_OPM733_double_extend_keeps_imported_share() {
-    // OPM-733 incident 2 (ADA, YOLO V2 live log 2026-06-08): bootstrap import,
+    // OPM-733 incident 2 (ADA, observed in live trading): bootstrap import,
     // then same-side EXTENDs on two consecutive daily rebalances. The 2nd
     // extend's pre-extend snapshot ran while ALREADY in multi-tracker mode and
     // absorbed extend #1's fill into the IMPORTED_ share (81910 -> 87741).
@@ -517,7 +517,7 @@ void test_OPM733_triple_extend_keeps_imported_share() {
 }
 
 void test_OPM733_regular_partial_close_reports_net() {
-    // OPM-733 incident 1 (TRX, YOLO V2 live log 2026-06-01): a mapped trade
+    // OPM-733 incident 1 (TRX, observed in live trading): a mapped trade
     // (real oid) is partially closed via BrokerSell2 (61796 -> 58508 open).
     // BrokerTrade's fill-poll then re-reported the entry order's gross fill
     // (61796), and Zorro wrote it back into the ledger ("filled 61796 of
