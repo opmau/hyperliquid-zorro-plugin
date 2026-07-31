@@ -234,7 +234,7 @@ double handleHyperliquidCommand(int mode, intptr_t parameter) {
         }
         if (!coin || !*coin) {
             hl::g_logger.log(1, "HL_GET_FUNDING_RATE: no coin — pass coin name as parameter "
-                                "or call asset() first [OPM-197]");
+                                "or call asset() first");
             return 0.0;
         }
         return hl::market::getFundingRate(coin);

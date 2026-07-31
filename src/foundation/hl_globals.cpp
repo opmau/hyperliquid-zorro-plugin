@@ -268,7 +268,7 @@ size_t Logger::drain(size_t maxMessages) {
     if (now > lastReportedDrops_) {
         char warn[160];
         snprintf(warn, sizeof(warn),
-                 "WARN [OPM-550] Logger dropped %llu messages (queue overflow)",
+                 "WARN Logger dropped %llu messages (queue overflow)",
                  (unsigned long long)(now - lastReportedDrops_));
         if (callback) callback(warn);
         lastReportedDrops_ = now;

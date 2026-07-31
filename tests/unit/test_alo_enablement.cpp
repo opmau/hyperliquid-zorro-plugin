@@ -220,7 +220,7 @@ TEST_CASE(cr4_canonical_tif_rejects_invalid) {
 // HL returns per-order rejects under a TOP-LEVEL status:"ok", so the err
 // branch never saw them and every reject collapsed into "No order ID in
 // exchange response". Error strings below are copied verbatim from
-// docs/hyperliquid-api/08-error-responses.md.
+// Hyperliquid's documented API error responses.
 
 TEST_CASE(cr5_classify_post_only_reject) {
     ASSERT_EQ(hl::trading::ORDER_ERR_POST_ONLY,
@@ -350,7 +350,7 @@ TEST_CASE(cr5_last_order_error_roundtrip) {
 //=============================================================================
 // CR-6 (OPM-796): side-aware rounding + integer exemption  [real implementation]
 //=============================================================================
-// HL rule (docs/hyperliquid-api/03-tick-and-lot-size.md): up to 5 significant
+// HL rule (Hyperliquid tick-and-lot-size docs): up to 5 significant
 // figures and at most (MAX_DECIMALS - szDecimals) decimals, but "Integer
 // prices are always allowed, regardless of the number of significant figures.
 // E.g. 123456 is a valid price even though 12345.6 is not."

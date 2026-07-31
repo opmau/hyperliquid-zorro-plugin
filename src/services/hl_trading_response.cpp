@@ -17,8 +17,7 @@
 // reprice one tick back" apart from "margin/signing failure -> stop trading
 // this asset"; this module is what makes that distinction reachable.
 //
-// Error strings are those documented in
-// docs/hyperliquid-api/08-error-responses.md.
+// Error strings are those documented in Hyperliquid's API error responses.
 //=============================================================================
 
 #include "hl_trading_service.h"

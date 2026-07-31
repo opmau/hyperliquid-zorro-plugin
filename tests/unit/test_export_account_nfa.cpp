@@ -12,11 +12,11 @@
 // is the Zorro account-compliance bitfield, documented identically in two
 // places:
 //
-//   docs/zorro_docs/Functions/brokercommand.md:41 (GET_COMPLIANCE)
+//   Zorro brokerCommand reference, GET_COMPLIANCE:
 //     1 = no partial closing, 2 = no hedging, 4 = FIFO compliance,
 //     8 = no closing of trades, 15 = full NFA compliant account
 //
-//   docs/zorro_docs/Main_Topics/account.md:315 (Accounts.csv NFA column)
+//   Zorro account reference, the Accounts.csv NFA column:
 //     0 = no restrictions, 2 = Hedge=0 (no hedging),
 //     14 or 15 = NFA = on (full NFA compliance)
 //
@@ -42,7 +42,7 @@
 using namespace hl::test;
 
 //-----------------------------------------------------------------------------
-// Zorro account-compliance bitfield (brokercommand.md:41)
+// Zorro account-compliance bitfield (brokerCommand GET_COMPLIANCE)
 //-----------------------------------------------------------------------------
 static const int ZORRO_NO_PARTIAL_CLOSING = 1;
 static const int ZORRO_NO_HEDGING         = 2;
@@ -83,8 +83,8 @@ void test_default_sets_no_compliance_bits() {
 //-----------------------------------------------------------------------------
 // TEST 3: The default never enables full NFA mode.
 //
-// account.md:315 reserves 14/15 for NFA=on. brokerplugin.md:470-473: when the
-// NFA flag is set, Zorro stops calling BrokerSell2 and closes via
+// Zorro reserves 14/15 for NFA=on. Per its broker-plugin reference, when the
+// NFA flag is set Zorro stops calling BrokerSell2 and closes via
 // BrokerBuy2(StopDist=-1) instead. BrokerSell2 is this plugin's live close
 // path, so defaulting to 14/15 would reroute closing onto the other path.
 //-----------------------------------------------------------------------------
