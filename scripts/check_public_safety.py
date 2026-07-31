@@ -114,6 +114,7 @@ def repo_root() -> Path:
         out = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
             capture_output=True, text=True, check=True,
+            encoding="utf-8", errors="replace",
         )
     except (OSError, subprocess.CalledProcessError):
         sys.stderr.write("error: not inside a git repository\n")
@@ -152,13 +153,17 @@ def is_excluded(path: str) -> bool:
 
 
 def git_lines(args: list[str]) -> list[str]:
-    out = subprocess.run(["git", *args], capture_output=True, text=True, check=True)
+    out = subprocess.run(["git", *args], capture_output=True, text=True,
+                         check=True, encoding="utf-8", errors="replace")
     return [ln for ln in out.stdout.splitlines() if ln]
 
 
 def staged_content(path: str) -> str | None:
     """Content of a path as it currently sits in the index."""
-    out = subprocess.run(["git", "show", f":{path}"], capture_output=True, text=True)
+    # errors="replace" rather than a bare decode: a file this tool cannot decode
+    # must still be scanned, never silently skipped.
+    out = subprocess.run(["git", "show", f":{path}"], capture_output=True,
+                         text=True, encoding="utf-8", errors="replace")
     if out.returncode != 0:
         return None
     return out.stdout
