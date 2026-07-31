@@ -35,9 +35,9 @@ static const char* SPOT_UNIFIED_MAINNET =
 // unifiedAccount, testnet. Perps accountValue is 0.0 here — the account is
 // funded entirely on the spot side. This is the payload that used to halt.
 static const char* SPOT_UNIFIED_TESTNET =
-    "{\"balances\":[{\"coin\":\"USDC\",\"token\":0,\"total\":\"806.550306\","
+    "{\"balances\":[{\"coin\":\"USDC\",\"token\":0,\"total\":\"1234.567890\","
     "\"hold\":\"0.0\",\"entryNtl\":\"0.0\"}],"
-    "\"tokenToAvailableAfterMaintenance\":[[0,\"806.550306\"]]}";
+    "\"tokenToAvailableAfterMaintenance\":[[0,\"1234.567890\"]]}";
 
 // "default" mode, mainnet sub-account. No tokenToAvailableAfterMaintenance.
 static const char* SPOT_DEFAULT_MAINNET =
@@ -79,7 +79,7 @@ TEST_CASE(spot_parse_unified_testnet) {
     ASSERT_TRUE(parseSpotClearinghouseState(SPOT_UNIFIED_TESTNET,
                                             strlen(SPOT_UNIFIED_TESTNET), s));
     ASSERT_TRUE(s.unifiedPool);
-    ASSERT_FLOAT_EQ_TOL(s.usdcTotal, 806.550306, 1e-6);
+    ASSERT_FLOAT_EQ_TOL(s.usdcTotal, 1234.567890, 1e-6);
 }
 
 TEST_CASE(spot_parse_default_has_no_unified_marker) {
@@ -199,12 +199,12 @@ TEST_CASE(collateral_unified_does_not_double_count_pnl) {
 }
 
 TEST_CASE(collateral_unified_testnet_no_longer_reports_zero) {
-    // The halt case: perps accountValue is 0.0 but the account holds 806.55.
+    // The halt case: perps accountValue is 0.0 but the account holds spot collateral.
     SpotState s;
     parseSpotClearinghouseState(SPOT_UNIFIED_TESTNET, strlen(SPOT_UNIFIED_TESTNET), s);
 
     CollateralView v = computeCollateral(0.0, 0.0, s);
-    ASSERT_FLOAT_EQ_TOL(v.equity, 806.550306, 1e-6);
+    ASSERT_FLOAT_EQ_TOL(v.equity, 1234.567890, 1e-6);
     ASSERT_GT(v.equity, 0.0);  // would otherwise trip zorroQuit()
 }
 

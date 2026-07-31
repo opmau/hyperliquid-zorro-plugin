@@ -79,9 +79,9 @@ struct SpotState {
 /// Parse a spotClearinghouseState body.
 ///
 /// Shape (verified live 2026-07-31, mainnet and testnet):
-///   {"balances":[{"coin":"USDC","token":0,"hold":"0.0","total":"806.550306",
+///   {"balances":[{"coin":"USDC","token":0,"hold":"0.0","total":"1234.567890",
 ///                 "entryNtl":"0.0"}, ...],
-///    "tokenToAvailableAfterMaintenance":[[0,"806.550306"]]}
+///    "tokenToAvailableAfterMaintenance":[[0,"1234.567890"]]}
 ///
 /// `tokenToAvailableAfterMaintenance` is present only when spot collateralizes
 /// perps. It was present on every unifiedAccount and portfolioMargin account
