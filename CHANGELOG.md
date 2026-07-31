@@ -11,6 +11,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Corrects the account equity reported to Zorro on Hyperliquid's unified and
+portfolio-margin account abstraction modes.
+
+**Upgrading:** reported `Balance` and `Equity` increase on those accounts, so a
+strategy that sizes positions from either will trade larger. Review your sizing,
+and check the figure against the balance shown in the Hyperliquid interface,
+before deploying.
+
+### Changed
+
+- **`BrokerAccount` reports equity according to the account's collateral model.**
+  Unified and portfolio-margin accounts hold a single spot USDC pool that
+  collateralizes both spot and perps. The plugin previously reported
+  `clearinghouseState.marginSummary.accountValue`, which covers perps on the
+  main dex only.
+
+  Equity is now the spot USDC `total` on a `unifiedAccount` or
+  `portfolioMargin` account, and perps `accountValue` plus spot USDC on a
+  `disabled` or `default` one.
+
+  Accounts on `disabled` and `default` are unaffected in substance. The model is
+  determined from the shape of the `spotClearinghouseState` response rather than
+  the `userAbstraction` string, so accounts stay correctly classified if
+  Hyperliquid adds a mode name.
+
+  Staked HYPE is excluded. Hyperliquid's `portfolio` endpoint counts delegated
+  stake at mark, which cannot margin a perp position.
+
+### Fixed
+
+- **An account funded entirely on the spot side reported a balance of `0`,**
+  which triggered the plugin's zero-balance guard — stopping the strategy and
+  reporting a suspected wallet-address misconfiguration.
+
+- **The `default` abstraction mode was not recognised** and was handled as
+  unified. It is now classified with `disabled` as a separate-pool account. The
+  mode is also resolved when login falls back to HTTP.
+
+- **Integer-typed JSON values were read as `0.0`.** On a multi-collateral
+  account this could match the wrong token and report another token's collateral
+  as USDC's.
+
 ## [2.1.0] — 2026-07-28
 
 Adds working post-only (ALO) maker execution, reports exchange order rejects to
@@ -225,9 +267,9 @@ CI/CD (the release DLL is now built and published automatically on tag).
   alongside an existing `IMPORTED_` position. Zorro then saw e.g. `-0.30075` BTC while
   Hyperliquid held `-0.21060`, the reconcile delta exceeded the strategy's $500 HALT
   threshold, and every subsequent daily rebalance was skipped. Fixed with per-tradeID
-  share accounting so each tradeID reports only its own portion. Observed on the live
-  YOLO_HL_Native rebalance (2026-05-24): BTC and XRP each drifted by exactly one
-  prior order's size.
+  share accounting so each tradeID reports only its own portion. Observed in live
+  trading on a daily rebalance, where two assets each drifted by exactly one prior
+  order's size.
 
 ### Added
 

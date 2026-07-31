@@ -3,11 +3,11 @@
 //=============================================================================
 // PREVENTS BUGS: OPM-791..OPM-798 (epic OPM-790)
 //
-// Background: no ALO order had EVER reached the exchange from this stack. All
-// 148 live orders in Zorro\Log\YOLO_HL_Native_V2_real.log went out
-// "tif":"Ioc" despite the strategy calling brokerCommand(50012,"Alo") since
-// February. These tests lock in each of the fixes that made maker execution
-// reachable.
+// Background: post-only orders never reached the exchange. In live trading every
+// order went out with "tif":"Ioc" even when the strategy had called
+// brokerCommand(50012,"Alo"), because Zorro re-sends SET_ORDERTYPE at every
+// order entry and can only derive a non-ALO type. These tests lock in each of
+// the fixes that made maker execution reachable.
 //
 // TESTS (against the REAL implementations, not simulations, wherever the code
 // is free of Zorro/HTTP dependencies):
@@ -220,7 +220,7 @@ TEST_CASE(cr4_canonical_tif_rejects_invalid) {
 // HL returns per-order rejects under a TOP-LEVEL status:"ok", so the err
 // branch never saw them and every reject collapsed into "No order ID in
 // exchange response". Error strings below are copied verbatim from
-// docs/hyperliquid-api/08-error-responses.md.
+// Hyperliquid's documented API error responses.
 
 TEST_CASE(cr5_classify_post_only_reject) {
     ASSERT_EQ(hl::trading::ORDER_ERR_POST_ONLY,
@@ -350,7 +350,7 @@ TEST_CASE(cr5_last_order_error_roundtrip) {
 //=============================================================================
 // CR-6 (OPM-796): side-aware rounding + integer exemption  [real implementation]
 //=============================================================================
-// HL rule (docs/hyperliquid-api/03-tick-and-lot-size.md): up to 5 significant
+// HL rule (Hyperliquid tick-and-lot-size docs): up to 5 significant
 // figures and at most (MAX_DECIMALS - szDecimals) decimals, but "Integer
 // prices are always allowed, regardless of the number of significant figures.
 // E.g. 123456 is a valid price even though 12345.6 is not."
@@ -633,6 +633,63 @@ TEST_CASE(cr8_open_order_unaffected_by_the_reorder) {
 }
 
 //=============================================================================
+// CR-9: modify TIF must satisfy the always_place=false rule  [real impl]
+//=============================================================================
+// packBatchModifyAction omits the action's `a` (always_place) field, because
+// the exchange docs require it: "a must be skipped if false, i.e. actions
+// hashed with a: false will be rejected". Omitting it means always_place is
+// false, and that branch constrains the replacement order:
+//
+//   "When always_place = false the new order must be a non-trigger order, and
+//    must have TIF = ALO or a non-executable order with TIF = GTC. In the
+//    latter case, TIF of the new order is overridden to ALO."
+//     -- Hyperliquid exchange-endpoint docs, batchModify
+//
+// So IOC is rejected by the exchange unconditionally. 50044 hardcodes ALO, but
+// 50042 (HL_MODIFY_ORDER) forwards a caller-supplied TIF whose struct default
+// is Gtc — an IOC modify used to go out and come back as an opaque failure.
+
+TEST_CASE(cr9_ioc_is_never_valid_for_modify) {
+    // Unconditionally rejected by HL: guard it before spending a round trip.
+    ASSERT_FALSE(isTifValidForModify("Ioc"));
+    ASSERT_FALSE(isTifValidForModify("ioc"));   // casing must not smuggle it through
+    ASSERT_FALSE(isTifValidForModify("IOC"));
+}
+
+TEST_CASE(cr9_alo_is_valid_for_modify) {
+    // The reprice path. Explicitly allowed by the always_place=false branch.
+    ASSERT_TRUE(isTifValidForModify("Alo"));
+    ASSERT_TRUE(isTifValidForModify("alo"));
+    ASSERT_TRUE(isTifValidForModify("ALO"));
+}
+
+TEST_CASE(cr9_gtc_is_valid_for_modify) {
+    // Conditionally accepted — HL takes a non-executable GTC and overrides it
+    // to ALO. Executability is not knowable client-side, so this is not a
+    // client-side reject; the exchange decides.
+    ASSERT_TRUE(isTifValidForModify("Gtc"));
+    ASSERT_TRUE(isTifValidForModify("gtc"));
+}
+
+TEST_CASE(cr9_invalid_tif_is_rejected_for_modify) {
+    ASSERT_FALSE(isTifValidForModify("Fok"));
+    ASSERT_FALSE(isTifValidForModify(""));
+    ASSERT_FALSE(isTifValidForModify(nullptr));
+    ASSERT_FALSE(isTifValidForModify("Alo "));  // no silent trimming, as canonicalTif
+}
+
+TEST_CASE(cr9_modify_validity_agrees_with_canonical_tif) {
+    // Anything canonicalTif rejects must also be invalid for modify — the guard
+    // narrows the valid set, it must never widen it.
+    const char* junk[] = {"Fok", "", "Alo ", "Post", "gtc "};
+    for (int i = 0; i < 5; ++i) {
+        if (canonicalTif(junk[i]) == nullptr) {
+            ASSERT_FALSE(isTifValidForModify(junk[i]));
+        }
+    }
+}
+
+//=============================================================================
 // MAIN
 //=============================================================================
 
@@ -702,6 +759,13 @@ int main() {
     RUN_TEST(cr8_cancelled_after_full_close_is_nay_minus_1);
     RUN_TEST(cr8_sublot_residual_does_not_resurrect_a_trade);
     RUN_TEST(cr8_open_order_unaffected_by_the_reorder);
+
+    printf("\n--- CR-9: modify TIF vs always_place=false ---\n");
+    RUN_TEST(cr9_ioc_is_never_valid_for_modify);
+    RUN_TEST(cr9_alo_is_valid_for_modify);
+    RUN_TEST(cr9_gtc_is_valid_for_modify);
+    RUN_TEST(cr9_invalid_tif_is_rejected_for_modify);
+    RUN_TEST(cr9_modify_validity_agrees_with_canonical_tif);
 
     return printTestSummary();
 }

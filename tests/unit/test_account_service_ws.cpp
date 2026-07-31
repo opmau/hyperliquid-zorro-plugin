@@ -18,6 +18,7 @@
 #include "../../src/foundation/hl_types.h"
 #include "../../src/foundation/hl_globals.h"
 #include "../../src/transport/ws_price_cache.h"
+#include "../../src/services/hl_account_collateral.h"
 #include <cstring>
 #include <cmath>
 #include <vector>
@@ -44,11 +45,13 @@ struct Balance {
     double unrealizedPnl() const { return accountValue - withdrawable; }
 };
 
-/// Extracted from account_service.cpp:getBalance() lines 45-90
+/// Extracted from account_service.cpp:getBalance().
 /// Tests the WS-cache-reading path without HTTP fallback.
-/// @param isStandard true = Standard (disabled) mode where spotUSDC must be added separately
-Balance getBalance(ws::PriceCache& cache, bool wsEnabled, uint32_t maxAgeMs,
-                   bool isStandard = false) {
+///
+/// The equity arithmetic itself is NOT duplicated here — it calls the same
+/// computeCollateral() the plugin calls, so this test cannot drift from
+/// production. Payload-level cases live in test_unified_collateral.cpp.
+Balance getBalance(ws::PriceCache& cache, bool wsEnabled, uint32_t maxAgeMs) {
     Balance result;
 
     if (wsEnabled) {
@@ -57,13 +60,17 @@ Balance getBalance(ws::PriceCache& cache, bool wsEnabled, uint32_t maxAgeMs,
 
         if (age < maxAgeMs) {
             result.dataReceived = true;
-            // [OPM-200] Only add spot USDC for standard accounts.
-            // Unified/PortfolioMargin: crossMarginSummary already includes spot.
-            if (isStandard) {
-                result.accountValue = accData.accountValue + accData.spotUSDC;
-            } else {
-                result.accountValue = accData.accountValue;
-            }
+
+            hl::account::SpotState spot;
+            spot.usdcTotal       = accData.spotUSDC;
+            spot.availAfterMaint = accData.spotAvailAfterMaint;
+            spot.unifiedPool     = accData.spotUnifiedPool;
+            spot.valid           = accData.spotDataValid;
+
+            hl::account::CollateralView view = hl::account::computeCollateral(
+                accData.accountValue, accData.totalMarginUsed, spot);
+            result.accountValue = view.equity;
+
             result.withdrawable = accData.withdrawable;
             result.marginUsed = accData.totalMarginUsed;
             result.totalNotional = accData.totalNtlPos;
@@ -186,30 +193,53 @@ TEST_CASE(ws_getbalance_fresh_data) {
     ASSERT_GT(bal.timestamp, (uint32_t)0);
 }
 
-TEST_CASE(ws_getbalance_with_spot_usdc_standard) {
-    // [OPM-200] Standard mode: spot USDC added separately
+TEST_CASE(ws_getbalance_with_spot_usdc_separate_pools) {
+    // "disabled" / "default": spot USDC is separate capital, so the two add.
     ws::PriceCache cache;
     cache.setAccountData(10000.0, 1000.0, 9000.0, 30000.0);
-    cache.setSpotUSDC(500.0);
+    cache.setSpotState(500.0, 0.0, false);  // no unified-pool marker
 
-    AcctWs::Balance bal = AcctWs::getBalance(cache, true, 60000, true);  // isStandard=true
+    AcctWs::Balance bal = AcctWs::getBalance(cache, true, 60000);
     ASSERT_TRUE(bal.dataReceived);
-    // accountValue should be perps(10000) + spot(500) = 10500
+    // perps(10000) + spot(500) = 10500
     ASSERT_FLOAT_EQ_TOL(bal.accountValue, 10500.0, 0.01);
     ASSERT_FLOAT_EQ_TOL(bal.withdrawable, 9000.0, 0.01);
 }
 
 TEST_CASE(ws_getbalance_with_spot_usdc_unified) {
-    // [OPM-200] Unified mode: spot USDC already in crossMarginSummary — don't add again
+    // [OPM-824] Unified: the spot USDC pool IS the equity. The perps figure is
+    // perps-only AND dex-0 only, so it is not added and not used.
     ws::PriceCache cache;
-    cache.setAccountData(10500.0, 1000.0, 9000.0, 30000.0);  // 10500 already includes spot
-    cache.setSpotUSDC(500.0);
+    cache.setAccountData(10500.0, 1000.0, 9000.0, 30000.0);
+    cache.setSpotState(23942.44, 17397.16, true);
 
-    AcctWs::Balance bal = AcctWs::getBalance(cache, true, 60000, false);  // isStandard=false (unified)
+    AcctWs::Balance bal = AcctWs::getBalance(cache, true, 60000);
     ASSERT_TRUE(bal.dataReceived);
-    // accountValue should be 10500 (NOT 11000)
-    ASSERT_FLOAT_EQ_TOL(bal.accountValue, 10500.0, 0.01);
+    // 23942.44 — not 10500 (perps only) and not 34442.44 (the sum)
+    ASSERT_FLOAT_EQ_TOL(bal.accountValue, 23942.44, 0.01);
     ASSERT_FLOAT_EQ_TOL(bal.withdrawable, 9000.0, 0.01);
+}
+
+TEST_CASE(ws_getbalance_unified_zero_perps_still_reports_equity) {
+    // [OPM-824] The halt case: perps accountValue is 0 while the account
+    // holds usable collateral on the spot side.
+    ws::PriceCache cache;
+    cache.setAccountData(0.0, 0.0, 0.0, 0.0);
+    cache.setSpotState(1234.567890, 1234.567890, true);
+
+    AcctWs::Balance bal = AcctWs::getBalance(cache, true, 60000);
+    ASSERT_TRUE(bal.dataReceived);
+    ASSERT_FLOAT_EQ_TOL(bal.accountValue, 1234.567890, 1e-6);
+}
+
+TEST_CASE(ws_getbalance_no_spot_snapshot_falls_back_to_perps) {
+    // Spot never fetched: report perps rather than 0, which would halt.
+    ws::PriceCache cache;
+    cache.setAccountData(10000.0, 1000.0, 9000.0, 30000.0);
+
+    AcctWs::Balance bal = AcctWs::getBalance(cache, true, 60000);
+    ASSERT_TRUE(bal.dataReceived);
+    ASSERT_FLOAT_EQ_TOL(bal.accountValue, 10000.0, 0.01);
 }
 
 TEST_CASE(ws_getbalance_stale_data) {
@@ -522,8 +552,10 @@ int main() {
 
     // getBalance with WS cache states
     RUN_TEST(ws_getbalance_fresh_data);
-    RUN_TEST(ws_getbalance_with_spot_usdc_standard);
+    RUN_TEST(ws_getbalance_with_spot_usdc_separate_pools);
     RUN_TEST(ws_getbalance_with_spot_usdc_unified);
+    RUN_TEST(ws_getbalance_unified_zero_perps_still_reports_equity);
+    RUN_TEST(ws_getbalance_no_spot_snapshot_falls_back_to_perps);
     RUN_TEST(ws_getbalance_stale_data);
     RUN_TEST(ws_getbalance_missing_data);
     RUN_TEST(ws_getbalance_ws_disabled);

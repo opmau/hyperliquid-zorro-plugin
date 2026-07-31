@@ -166,7 +166,7 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
                     hl::account::PositionInfo pos = hl::account::getPosition(coinForApi.c_str());
                     DWORD posAge = hl::account::getPositionsAge();
                     if (!pos.isOpen() && posAge != MAXDWORD) {
-                        hl::g_logger.logf(1, "BrokerBuy2: CLOSE - no price but %s is flat (age %ums) [OPM-227]",
+                        hl::g_logger.logf(1, "BrokerBuy2: CLOSE - no price but %s is flat (age %ums)",
                                           coinForApi.c_str(), posAge);
                         int earlyTradeId = hl::trading::generateTradeId();
                         if (pFill) *pFill = abs(volume);
@@ -202,7 +202,7 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
         DWORD posAge = hl::account::getPositionsAge();
         if (!pos.isOpen() && posAge != MAXDWORD) {
             hl::g_logger.logf(1, "BrokerBuy2: CLOSE - %s has no position (data age %ums), "
-                              "already flat [OPM-227]", coinForApi.c_str(), posAge);
+                              "already flat", coinForApi.c_str(), posAge);
             if (pFill) *pFill = abs(volume);
             if (pPrice) *pPrice = 0;
             return tradeId;
@@ -253,7 +253,7 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
             DWORD posAge = hl::account::getPositionsAge();
             if (!pos.isOpen() && posAge != MAXDWORD) {
                 hl::g_logger.logf(1, "BrokerBuy2: CLOSE rejected but %s is flat (age %ums) "
-                                  "— reporting success [OPM-227]", coinForApi.c_str(), posAge);
+                                  "— reporting success", coinForApi.c_str(), posAge);
                 if (pFill) *pFill = abs(volume);
                 if (pPrice) *pPrice = 0;
                 return tradeId;
@@ -321,7 +321,7 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
         DWORD posAge = hl::account::getPositionsAge();
         if (!pos.isOpen() && posAge != MAXDWORD) {
             hl::g_logger.logf(1, "BrokerSell2: No position for %s (data age %ums), "
-                              "already flat [OPM-227]", state.coin, posAge);
+                              "already flat", state.coin, posAge);
             if (pClose) {
                 hl::PriceData price = hl::market::getPrice(state.coin);
                 *pClose = price.mid > 0 ? price.mid : state.avgPrice;
@@ -389,7 +389,7 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
         DWORD posAge = hl::account::getPositionsAge();
         if (!pos.isOpen() && posAge != MAXDWORD) {
             hl::g_logger.logf(1, "BrokerSell2: Close rejected but %s is flat (age %ums) "
-                              "— reporting success [OPM-227]", state.coin, posAge);
+                              "— reporting success", state.coin, posAge);
             if (pClose) {
                 hl::PriceData price = hl::market::getPrice(state.coin);
                 *pClose = price.mid > 0 ? price.mid : state.avgPrice;

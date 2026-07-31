@@ -234,7 +234,7 @@ double handleHyperliquidCommand(int mode, intptr_t parameter) {
         }
         if (!coin || !*coin) {
             hl::g_logger.log(1, "HL_GET_FUNDING_RATE: no coin — pass coin name as parameter "
-                                "or call asset() first [OPM-197]");
+                                "or call asset() first");
             return 0.0;
         }
         return hl::market::getFundingRate(coin);
@@ -342,6 +342,22 @@ double handleHyperliquidCommand(int mode, intptr_t parameter) {
         return written;
     }
 
+    case HL_SET_EXPORT_NFA: {
+        // [OPM-801] Compliance bitfield for the NFA column of 50003's template.
+        // Zorro never passes the account's NFA setting to the plugin, so the
+        // caller supplies it: 1 = no partial closing, 2 = no hedging, 4 = FIFO,
+        // 8 = no closing of trades (14/15 = full NFA compliance).
+        int nfa = (int)parameter;
+        if (nfa < 0 || nfa > 15) {
+            hl::g_logger.logf(1, "HL_SET_EXPORT_NFA: %d out of range (0-15)", nfa);
+            return 0;
+        }
+        hl::g_config.exportNfa = nfa;
+        if (hl::g_config.diagLevel >= 1)
+            hl::g_logger.logf(1, "HL_SET_EXPORT_NFA: export NFA column = %d", nfa);
+        return 1;
+    }
+
     case HL_EXPORT_ACCOUNT: {
         // Export Accounts.csv row with current connection info
         const char* path = (const char*)parameter;
@@ -357,8 +373,9 @@ double handleHyperliquidCommand(int mode, intptr_t parameter) {
             "Hyperliquid.dll";
 #endif
 
-        // NFA column stays neutral: it is the user's compliance setting, made in
-        // Accounts.csv or via set(NFA)/Hedge in the script. [OPM-801]
+        // NFA column comes from the caller, never from the plugin: it is the
+        // user's compliance setting, made in Accounts.csv or via
+        // set(NFA)/Hedge, and defaults to neutral. [OPM-801]
         fprintf(f, "Name,Server,AccountId,User,Pass,Assets,CCY,Real,NFA,Plugin\n");
         fprintf(f, "%s,%s,%s,%s,%s,AssetsHyperliquid,USD,%d,%d,%s\n",
                 PLUGIN_NAME,
@@ -367,7 +384,7 @@ double handleHyperliquidCommand(int mode, intptr_t parameter) {
                 hl::g_config.walletAddress[0] ? hl::g_config.walletAddress : "0",
                 hl::g_config.privateKey[0] ? hl::g_config.privateKey : "0",
                 hl::g_config.isTestnet ? 0 : 1,
-                hl::config::EXPORT_ACCOUNT_NFA,
+                hl::g_config.exportNfa,
                 dllName);
 
         fclose(f);

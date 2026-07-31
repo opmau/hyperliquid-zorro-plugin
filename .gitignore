@@ -1,3 +1,5 @@
+# check-public-safety: allow untracked-path-reference (naming untracked paths is this file's purpose)
+
 # Zorro Log Files
 *.log
 Log/
@@ -120,13 +122,41 @@ docs/COMPLETED_ISSUES.md
 docs/KNOWN_ISSUES.md
 docs/LINEAR_SNAPSHOT.md
 
-# Environment variables (may contain API keys)
-.env
+#-----------------------------------------------------------------------------
+# Secrets.
+#
+# Zorro stores the wallet key entered in the Password field as PLAINTEXT in
+# Accounts.csv, and this plugin signs exchange requests with a secp256k1 private
+# key. These rules are deliberately broad: a key committed to a public
+# repository is compromised the moment it is pushed, and rotating it is the only
+# remedy. Prefer a false positive here over a disclosure.
+#-----------------------------------------------------------------------------
 
-# Credentials — Zorro account list contains PLAINTEXT private keys. Never commit.
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Zorro account list — plaintext credentials
 Accounts.csv
 **/Accounts.csv
-rw_api_key.txt
+
+# Keys, certificates, wallets and token files
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ecdsa*
+id_ed25519*
+wallet*.json
+keystore*.json
+secrets*.json
+*_api_key*.txt
+*_token*.txt
+private.key
+private*.pem
 
 # Scraped documentation (regenerated locally, not source of truth)
 docs/zorro_docs/
@@ -154,8 +184,13 @@ tests/generate_triage_report.py
 docs/REFACTOR_CHECKLIST_v2.md
 docs/archive/
 
-# Maintainer working notes at repo root (investigation logs, parallel-run CSVs, etc.)
-/opm-*-investigation.md
+# Maintainer working notes at repo root (investigation notes, run captures, etc.)
+/*-investigation.md
 /parallel_run*.csv
-/yolo_*.log
+/hl_ws_cadence_*.csv
 /REVIEW.md
+
+# Deny list used by scripts/check_public_safety.py. Untracked on purpose: it
+# names private strategies, accounts and logs, so publishing it would disclose
+# exactly what it exists to protect. See .private-terms.example.
+.private-terms

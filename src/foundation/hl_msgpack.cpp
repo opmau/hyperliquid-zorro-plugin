@@ -346,7 +346,7 @@ ByteArray packBatchModifyAction(
 
     // Outer map: 2 keys ("type", "modifies")
     // Field order verified against Python SDK bulk_modify_orders_new()
-    // refs/hyperliquid-python-sdk/hyperliquid/exchange.py:205-208
+    // bulk_modify_orders_new() in hyperliquid/exchange.py
     packer.packMapHeader(2);
 
     packer.packString("type");

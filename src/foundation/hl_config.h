@@ -77,17 +77,23 @@ constexpr int MAX_RECENT_FILLS         = 100;    // Recent fills to keep in cach
 // ACCOUNT EXPORT
 // =============================================================================
 
-// NFA column written by HL_EXPORT_ACCOUNT (50003) into its Accounts.csv
-// template. This is Zorro's account-compliance bitfield (brokercommand.md:41,
-// account.md:315): 1 = no partial closing, 2 = no hedging, 4 = FIFO,
-// 8 = no closing of trades, 14/15 = full NFA compliance.
+// DEFAULT for the NFA column that HL_EXPORT_ACCOUNT (50003) writes into its
+// Accounts.csv template. Zorro's account-compliance bitfield
+// (brokercommand.md:41, account.md:315): 1 = no partial closing, 2 = no
+// hedging, 4 = FIFO, 8 = no closing of trades, 14/15 = full NFA compliance.
 //
-// It is the USER's setting, chosen in Accounts.csv or in the strategy via
-// set(NFA) / Hedge - Zorro never sends it to the plugin, so the plugin cannot
-// know it and must not impose one. 0 ("no restrictions") is therefore the only
-// correct template value; it matches every live Hyperliquid account row and
-// leaves the choice with the user. [OPM-801]
-constexpr int EXPORT_ACCOUNT_NFA       = 0;
+// This is the USER's setting, not the plugin's. It is chosen in Accounts.csv or
+// in the strategy via set(NFA) / Hedge, and Zorro never sends it to the plugin,
+// so the plugin cannot know it. The default is therefore 0 ("no restrictions"),
+// which imposes nothing and matches every live Hyperliquid account row; a
+// strategy overrides it with brokerCommand(50004, n) before exporting.
+//
+// Do NOT raise this default on the grounds that Hyperliquid lacks a feature.
+// NFA and Hedge drive Zorro's OWN trade management - virtual hedging, phantom
+// and pool trades, FIFO ordering - which runs inside Zorro and nets down before
+// the exchange sees an order. They stay useful on a broker that has no such
+// mode, and exchange capabilities change. [OPM-801]
+constexpr int EXPORT_ACCOUNT_NFA_DEFAULT = 0;
 
 // =============================================================================
 // PLUGIN INFO

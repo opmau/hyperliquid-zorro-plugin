@@ -53,10 +53,10 @@ would be a guaranteed reject.
 
 | Mode | Parameter | Returns | Notes |
 |------|-----------|---------|-------|
-| `GET_COMPLIANCE` (53) | — | `0` | Defers to the `NFA` column in `Accounts.csv` |
-| `GET_MAXREQUESTS` (44) | — | `5` | Max concurrent HTTP requests |
-| `GET_MAXTICKS` (40) | — | `5000` | Candles per history request |
-| `GET_BROKERZONE` (41) | — | `0` | Hyperliquid timestamps are UTC |
+| `GET_COMPLIANCE` (51) | — | `0` | Defers to the `NFA` column in `Accounts.csv` |
+| `GET_MAXREQUESTS` (45) | — | `5` | Max concurrent HTTP requests |
+| `GET_MAXTICKS` (43) | — | `5000` | Candles per history request |
+| `GET_BROKERZONE` (40) | — | `0` | Hyperliquid timestamps are UTC |
 | `GET_VOLUME` (61) | — | `1` | Signals tick activity exists |
 | `GET_PRICETYPE` (150) | — | `2` | Plugin returns bid/ask, not traded prices |
 | `SET_DIAGNOSTICS` (138) | level `int` | `1` | 0=off, 1=errors, 2=info, 3=verbose |
@@ -64,12 +64,12 @@ would be a guaranteed reject.
 | `SET_SYMBOL` (132) | symbol `string` | `1` | Sets the asset context for `GET_PRICE`, `GET_POSITION`, `DO_CANCEL(0)` |
 | `SET_ORDERTYPE` (157) | `0`/`2`/`4` (+`8`) | echo | `0`→Ioc, `2`→Gtc, `4`→Alo (sticky). `+8` = protective stop. `1`/`3` (AON) unsupported → `0` |
 | `SET_HWND` (172) | `HWND` | `1` | |
-| `GET_PRICE` (33) | `4`=mid, `5`=ask, `6`=bid | price | Per-asset; requires `SET_SYMBOL`. Hard `0.0` when no data |
-| `GET_POSITION` (34) | symbol `string` | net size | Cheap cached read, safe to poll |
-| `GET_POSITION` (34) | `0` | `1` | **Destructive** — rebuilds all positions from the broker |
-| `GET_TRADES` (82) | `TRADE*` | count | Imports broker positions into Zorro |
-| `DO_CANCEL` (108) | trade ID | `1`/`0` | Cancels that order. If a resting **close** order exists for the position, cancels that instead of the filled entry |
-| `DO_CANCEL` (108) | `0` | count | Cancels every resting order for the current `SET_SYMBOL`, or account-wide if none is set |
+| `GET_PRICE` (60) | `4`=mid, `5`=ask, `6`=bid | price | Per-asset; requires `SET_SYMBOL`. Hard `0.0` when no data |
+| `GET_POSITION` (53) | symbol `string` | net size | Cheap cached read, safe to poll |
+| `GET_POSITION` (53) | `0` | `1` | **Destructive** — rebuilds all positions from the broker |
+| `GET_TRADES` (71) | `TRADE*` | count | Imports broker positions into Zorro |
+| `DO_CANCEL` (301) | trade ID | `1`/`0` | Cancels that order. If a resting **close** order exists for the position, cancels that instead of the filled entry |
+| `DO_CANCEL` (301) | `0` | count | Cancels every resting order for the current `SET_SYMBOL`, or account-wide if none is set |
 
 ---
 
@@ -139,6 +139,20 @@ if (!id) {
 structs contain `std::string` members, so they are reachable only from C++.
 `50044` is the Lite-C-callable equivalent of `50042`.
 
+#### Modify replaces with a maker order, never an IOC
+
+Both modify paths omit the action's `a` (`always_place`) field, because
+Hyperliquid rejects any action hashed with `a: false`. `always_place` is
+therefore false, and that branch constrains the replacement order: it must be
+`Alo`, or a **non-executable** `Gtc` that the exchange then rewrites to `Alo`.
+
+`50044` always sends `Alo`, so it is unaffected. `50042` forwards whatever TIF
+the caller put in its `ModifyRequest` — whose struct default is `Gtc` — so an
+`Ioc` modify was previously signed, sent, and rejected by the exchange with no
+indication of why. It is now refused locally with an explanatory error before
+the round trip. A `Gtc` modify is still forwarded: whether it is executable is
+a question about the current book, which only the exchange can answer.
+
 #### `50044` — reprice a resting order
 
 ```c
@@ -157,9 +171,16 @@ int r = brokerCommand(50044, params);
 | `-1` | Trade ID is not tracked |
 | `-2` | Order already filled or cancelled — nothing to move |
 
-Uses Hyperliquid's `batchModify`, which preserves queue priority. Prefer this
-over cancel-and-replace: one round trip instead of two, and no window in which
-the order could fill between the cancel and the replacement.
+Uses Hyperliquid's `batchModify`. Prefer it over cancel-and-replace: one round
+trip instead of two, and no window in which the order could fill between the
+cancel and the replacement.
+
+It does **not** preserve queue position, and nothing in the exchange docs says
+it does. A reprice moves the order to a different price level, where it is a
+new arrival like any other. Absent a priority fee, which this plugin never
+sends, a requote joins the **back** of its new level — see
+`docs/hyperliquid-api/12a-priority-fees.md`. Budget reprices accordingly rather
+than assuming they are free in queue terms.
 
 `-2` is the expected outcome when a reprice races a fill. Treat it as "the
 order is gone, re-read the position", not as an error.
@@ -175,13 +196,24 @@ close order (reduce-only), not the filled entry.
 | 50002 | `HL_EXPORT_META` | path `string` | Assets written |
 | 50003 | `HL_EXPORT_ACCOUNT` | path `string` | `1` |
 
+| 50004 | `HL_SET_EXPORT_NFA` | `0`…`15` | `1`, or `0` if out of range |
+
 `50003` writes a single-row `Accounts.csv` template from the current connection.
-Its `NFA` column is emitted as `0` ("no restrictions") and is yours to set — the
-column is Zorro's account-compliance bitfield (`1` no partial closing, `2` no
-hedging, `4` FIFO, `8` no closing of trades, `14`/`15` full NFA compliance), and
-Zorro never passes it to the plugin. Choose it in `Accounts.csv`, or in the
-strategy via `set(NFA)` and `Hedge`. Note that `14`/`15` switch Zorro's close
-path from `BrokerSell2` to `BrokerBuy2(StopDist=-1)`.
+
+Its `NFA` column is Zorro's account-compliance bitfield — `1` no partial
+closing, `2` no hedging, `4` FIFO, `8` no closing of trades, `14`/`15` full NFA
+compliance. That is your setting, not the plugin's: you choose it in
+`Accounts.csv`, or in the strategy via `set(NFA)` and `Hedge`. Zorro never
+passes it to the plugin, so the plugin cannot read it back — it defaults to `0`
+("no restrictions"), and `50004` sets what `50003` will write:
+
+```c
+brokerCommand(50004, 5);                    // virtual hedging, FIFO compliant
+brokerCommand(50003, "Accounts_HL.csv");    // template now carries NFA=5
+```
+
+Note that `14`/`15` switch Zorro's close path from `BrokerSell2` to
+`BrokerBuy2(StopDist=-1)`. Both paths are implemented.
 
 ### Debug
 
@@ -197,7 +229,14 @@ path from `BrokerSell2` to `BrokerBuy2(StopDist=-1)`.
 brokerCommand(50032, 60);            // dead-man's switch: cancel all in 60s
 brokerCommand(50012, "Alo");         // sticky — survives Zorro's auto-call
 
-OrderLimit = passivePrice;
+// Derive a price that cannot cross. An ALO order that would match is
+// cancelled outright, so this is the single most important step.
+brokerCommand(SET_SYMBOL, "BTC");
+var bid = brokerCommand(GET_PRICE, 6);
+var ask = brokerCommand(GET_PRICE, 5);
+if (bid <= 0 || ask <= 0) return;    // hard 0.0 means no data — never guess
+
+OrderLimit = bid;                    // buy: join the bid. Sell: use ask.
 int id = enterLong();
 
 if (!id) {
@@ -213,10 +252,13 @@ while (waited < timeout) {
     waited += 200;
 }
 
-// Still unfilled: reprice rather than cancel/replace.
-var params[3];
-params[0] = id; params[1] = newPrice; params[2] = 0;
-if (brokerCommand(50044, params) == -2) { /* it filled — re-read position */ }
+// Still unfilled: reprice rather than cancel/replace. Cap the attempts.
+if (reprices < maxReprices) {
+    var params[3];
+    params[0] = id; params[1] = brokerCommand(GET_PRICE, 6); params[2] = 0;
+    if (brokerCommand(50044, params) == -2) { /* it filled — re-read position */ }
+    reprices += 1;
+}
 
 // Give up: cancel everything resting on this symbol.
 brokerCommand(SET_SYMBOL, "BTC");
@@ -225,6 +267,36 @@ brokerCommand(DO_CANCEL, 0);
 brokerCommand(50012, "Ioc");         // release the sticky override
 brokerCommand(50032, 0);             // disarm the dead-man's switch
 ```
+
+### Choosing the passive price
+
+`GET_PRICE` needs `SET_SYMBOL` first and returns a hard `0.0` when the cache
+has nothing — treat that as "do not trade this bar", never as a price.
+
+| Side | Post at             | Crossing price that gets you `BadAloPx` |
+|------|---------------------|-----------------------------------------|
+| Buy  | bid, `GET_PRICE(6)` | anything at or above the ask            |
+| Sell | ask, `GET_PRICE(5)` | anything at or below the bid            |
+
+Joining your own side is safe; reaching across is what triggers the reject.
+The plugin rounds side-aware (buys floor, sells ceil), so rounding alone will
+never push your quote across the spread — but it cannot rescue a price that was
+already crossing when you passed it.
+
+### Budgeting reprices
+
+Every reprice costs one address-based request, and that budget is earned by
+**filling**, not by waiting: Hyperliquid allows one request per 1 USDC of
+cumulative traded volume since address inception, on top of an initial 10,000.
+Their own worked example is that a 100 USDC order needs a 1% fill rate to break
+even — so roughly 100 reprices per filled 100 USDC order before you are
+spending faster than you earn. Batched actions count as `n` requests here, not
+one.
+
+Exhausting it throttles the address to **one request every 10 seconds**, which
+is a bad state to reach holding an open position. Cap reprices per entry and
+fall back to a taker or to flat, rather than chasing a trend indefinitely. See
+`docs/hyperliquid-api/10-rate-limits.md`.
 
 A close placed while ALO is active rests too. `BrokerSell2` reports
 `*pFill = 0` until it actually fills, and Zorro's position stays open — which

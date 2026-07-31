@@ -137,9 +137,12 @@ void PriceCache::setAccountData(double accValue, double marginUsed,
     LeaveCriticalSection(&cs_);
 }
 
-void PriceCache::setSpotUSDC(double amount) {
+void PriceCache::setSpotState(double usdcTotal, double availAfterMaint, bool unifiedPool) {
     EnterCriticalSection(&cs_);
-    accountData_.spotUSDC = amount;
+    accountData_.spotUSDC = usdcTotal;
+    accountData_.spotAvailAfterMaint = availAfterMaint;
+    accountData_.spotUnifiedPool = unifiedPool;
+    accountData_.spotDataValid = true;
     accountData_.spotTimestamp = GetTickCount();
     LeaveCriticalSection(&cs_);
 }

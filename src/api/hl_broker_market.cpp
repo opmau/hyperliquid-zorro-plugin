@@ -138,6 +138,18 @@ DLLFUNC int BrokerAsset(char* symbol, double* pPrice, double* pSpread,
 // BrokerAccount - Get account balance
 //=============================================================================
 
+// Refresh everything the equity calculation depends on but the WS never
+// delivers: the abstraction mode and spotClearinghouseState. [OPM-824]
+//
+// Both must be refreshed on EVERY path that decides Zorro's balance, not just
+// the WS-success path — a login that fell back to HTTP used to skip the mode
+// query entirely. ensureAbstractionMode() self-limits to one call per session,
+// so the repetition is free.
+static void refreshCollateralState() {
+    hl::account::ensureAbstractionMode();
+    hl::account::refreshSpotBalance();
+}
+
 DLLFUNC int BrokerAccount(char* accountId, double* pBalance,
                           double* pTradeVal, double* pMarginVal) {
     if (!hl::g_config.walletAddress[0]) return 0;
@@ -170,13 +182,8 @@ DLLFUNC int BrokerAccount(char* accountId, double* pBalance,
     }
     if (balance.dataReceived && !g_everReceivedAccountData) {
         g_everReceivedAccountData = true;
-        // [OPM-200] Query abstraction mode to know whether spotUSDC is already
-        // included in crossMarginSummary (unified/portfolioMargin accounts).
-        hl::account::queryAbstractionMode();
-        // [OPM-19] Fetch spot USDC (not available via WS).
-        // Only added to balance for standard accounts (see getBalance).
-        hl::account::refreshSpotBalance();
-        balance = hl::account::getBalance();  // Re-read with mode-aware balance
+        refreshCollateralState();
+        balance = hl::account::getBalance();  // Re-read now that spot is known
     }
 
     if (!balance.dataReceived) {
@@ -186,7 +193,7 @@ DLLFUNC int BrokerAccount(char* accountId, double* pBalance,
             hl::g_logger.log(1, "BrokerAccount: WS not delivered, trying HTTP fallback");
         }
         if (hl::account::refreshBalance()) {
-            hl::account::refreshSpotBalance();
+            refreshCollateralState();
             balance = hl::account::getBalance();
             if (balance.dataReceived) {
                 g_everReceivedAccountData = true;
@@ -206,7 +213,7 @@ DLLFUNC int BrokerAccount(char* accountId, double* pBalance,
             hl::g_logger.log(1, "BrokerAccount: accountValue=0, one-time HTTP check");
         }
         hl::account::refreshBalance();
-        hl::account::refreshSpotBalance();
+        refreshCollateralState();
         balance = hl::account::getBalance();
 
         // [OPM-136] After HTTP confirmation, halt if zero balance AND zero positions.
@@ -235,8 +242,9 @@ DLLFUNC int BrokerAccount(char* accountId, double* pBalance,
 
     if (hl::g_config.diagLevel >= 2) {
         char msg[256];
-        sprintf_s(msg, "BrokerAccount: balance=%.2f margin=%.2f withdraw=%.2f",
-                  balance.accountValue, balance.marginUsed, balance.withdrawable);
+        sprintf_s(msg, "BrokerAccount: balance=%.2f margin=%.2f free=%.2f collateral=%s",
+                  balance.accountValue, balance.marginUsed, balance.freeCollateral,
+                  balance.unifiedCollateral ? "unified(spot)" : "separate(perps+spot)");
         hl::g_logger.log(2, msg);
     }
 

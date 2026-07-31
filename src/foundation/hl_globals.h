@@ -59,6 +59,12 @@ struct RuntimeConfig {
     // at login/logout.
     bool orderTypeSticky = false;
 
+    // [OPM-801] NFA/compliance value written into the Accounts.csv template by
+    // HL_EXPORT_ACCOUNT (50003). The plugin never decides this — it is the
+    // user's setting, made in Accounts.csv or via set(NFA)/Hedge. Defaults to
+    // neutral; a strategy overrides it with brokerCommand(50004, n).
+    int exportNfa = config::EXPORT_ACCOUNT_NFA_DEFAULT;
+
     // Zorro integration
     HWND zorroWindow = NULL;        // For WM_APP+1 notifications
     int cacheTimeoutMs = 2000;      // General cache timeout
