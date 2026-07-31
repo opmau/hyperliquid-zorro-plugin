@@ -350,13 +350,13 @@ if !ERRORLEVEL! EQU 0 (
 echo.
 
 REM =============================================================================
-REM Test 22: ALO Enablement (CR-1..CR-8) [OPM-790]
+REM Test 22: ALO Enablement (CR-1..CR-9) [OPM-790]
 REM Prevents: ALO clobbered by auto SET_ORDERTYPE, market orders inheriting Alo,
 REM           TIF casing signature mismatch, silent exchange rejects, symmetric
 REM           price rounding across the spread, phantom full closes on resting
 REM           close orders, cancels targeting oid 0, partial fills discarded.
 REM =============================================================================
-echo [22/24] Testing ALO enablement (CR-1..CR-8)...
+echo [22/24] Testing ALO enablement (CR-1..CR-9)...
 cmd /c .\compile_alo_enablement_test.bat
 if !ERRORLEVEL! EQU 0 (
     set /a TESTS_PASSED+=1

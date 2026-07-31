@@ -32,6 +32,15 @@ void normalizeCoin(const char* symbol, char* out, size_t outSize);
 // Returns "Ioc" / "Gtc" / "Alo", or nullptr when the input is not a valid TIF.
 const char* canonicalTif(const char* tif);
 
+// May this TIF be used as the replacement order of a modify/batchModify?
+// The plugin omits the action's `a` (always_place) field, because HL requires
+// it: "a must be skipped if false". always_place is therefore false, and that
+// branch constrains the replacement: it "must have TIF = ALO or a
+// non-executable order with TIF = GTC" — so IOC is rejected unconditionally.
+// GTC passes here because executability is a book question the exchange
+// answers, not one the plugin can settle locally.
+bool isTifValidForModify(const char* tif);
+
 // Is this a real exchange order ID (a positive decimal integer)? [OPM-797]
 // The tradeMap also holds synthetic IDs — "PENDING_<cloid>", "RESUMED_<n>",
 // "IMPORTED_<n>", "DRY_RUN" — which _atoi64 silently turns into 0, so a cancel

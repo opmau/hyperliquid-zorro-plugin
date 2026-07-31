@@ -111,6 +111,23 @@ ModifyResult modifyOrder(const ModifyRequest& request) {
         default: tif = "Ioc"; break;
     }
 
+    // packBatchModifyAction omits the action's `a` (always_place) field because
+    // HL rejects actions hashed with `a: false`. always_place is therefore
+    // false, and that branch requires the replacement to be ALO, or a
+    // non-executable GTC that HL rewrites to ALO. IOC can never satisfy it, so
+    // spending a signed round trip on one only buys an opaque exchange reject.
+    // modifyByTradeId (50044) always passes ALO; this guards 50042, whose
+    // ModifyRequest reaches us straight from a script.
+    if (!utils::isTifValidForModify(tif.c_str())) {
+        result.error = "TIF " + tif + " is invalid for modify: the plugin sends "
+                       "always_place=false, which requires Alo or a "
+                       "non-executable Gtc";
+        g_logger.logf(1, "modifyOrder: refusing %s modify for oid=%llu — %s",
+                      tif.c_str(), (unsigned long long)request.oid,
+                      result.error.c_str());
+        return result;
+    }
+
     // === STEP 1: Pack action with msgpack ===
     int apiAssetId = meta::getApiAssetId(assetIndex);  // [OPM-191]
     eip712::ByteArray packedAction = msgpack::packBatchModifyAction(

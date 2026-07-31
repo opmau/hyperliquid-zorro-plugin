@@ -2,10 +2,11 @@
 REM =============================================================================
 REM compile_alo_enablement_test.bat - ALO enablement regression tests [OPM-790]
 REM =============================================================================
-REM TESTS: CR-1..CR-8 — sticky ALO order type, market-order TIF forcing, TIF
+REM TESTS: CR-1..CR-9 — sticky ALO order type, market-order TIF forcing, TIF
 REM        casing canonicalization, exchange error parsing/classification,
 REM        side-aware price rounding + integer-price exemption, honest close
-REM        reporting, synthetic-oid cancel guard, partial-fill preservation.
+REM        reporting, synthetic-oid cancel guard, partial-fill preservation,
+REM        modify TIF vs the always_place=false rule.
 REM =============================================================================
 
 call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars32.bat" >nul 2>&1

@@ -111,6 +111,14 @@ const char* canonicalTif(const char* tif) {
     return nullptr;
 }
 
+bool isTifValidForModify(const char* tif) {
+    // Narrow canonicalTif's set — never widen it, so an unparseable TIF stays
+    // invalid here too.
+    const char* canonical = canonicalTif(tif);
+    if (!canonical) return false;
+    return strcmp(canonical, "Ioc") != 0;
+}
+
 bool isExchangeOrderId(const char* oid) {
     if (!oid || !*oid) return false;
     for (const char* p = oid; *p; ++p) {
