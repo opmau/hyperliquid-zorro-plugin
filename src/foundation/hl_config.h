@@ -74,6 +74,22 @@ constexpr int MAX_PENDING_ORDERS       = 100;    // Maximum concurrent pending o
 constexpr int MAX_RECENT_FILLS         = 100;    // Recent fills to keep in cache
 
 // =============================================================================
+// ACCOUNT EXPORT
+// =============================================================================
+
+// NFA column written by HL_EXPORT_ACCOUNT (50003) into its Accounts.csv
+// template. This is Zorro's account-compliance bitfield (brokercommand.md:41,
+// account.md:315): 1 = no partial closing, 2 = no hedging, 4 = FIFO,
+// 8 = no closing of trades, 14/15 = full NFA compliance.
+//
+// It is the USER's setting, chosen in Accounts.csv or in the strategy via
+// set(NFA) / Hedge - Zorro never sends it to the plugin, so the plugin cannot
+// know it and must not impose one. 0 ("no restrictions") is therefore the only
+// correct template value; it matches every live Hyperliquid account row and
+// leaves the choice with the user. [OPM-801]
+constexpr int EXPORT_ACCOUNT_NFA       = 0;
+
+// =============================================================================
 // PLUGIN INFO
 // =============================================================================
 
