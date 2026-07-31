@@ -154,8 +154,12 @@ tests/generate_triage_report.py
 docs/REFACTOR_CHECKLIST_v2.md
 docs/archive/
 
-# Maintainer working notes at repo root (investigation logs, parallel-run CSVs, etc.)
-/opm-*-investigation.md
+# Maintainer working notes at repo root (investigation notes, run captures, etc.)
+/*-investigation.md
 /parallel_run*.csv
-/yolo_*.log
 /REVIEW.md
+
+# Deny list used by scripts/check_public_safety.py. Untracked on purpose: it
+# names private strategies, accounts and logs, so publishing it would disclose
+# exactly what it exists to protect. See .private-terms.example.
+.private-terms

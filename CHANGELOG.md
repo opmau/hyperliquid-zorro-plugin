@@ -225,9 +225,9 @@ CI/CD (the release DLL is now built and published automatically on tag).
   alongside an existing `IMPORTED_` position. Zorro then saw e.g. `-0.30075` BTC while
   Hyperliquid held `-0.21060`, the reconcile delta exceeded the strategy's $500 HALT
   threshold, and every subsequent daily rebalance was skipped. Fixed with per-tradeID
-  share accounting so each tradeID reports only its own portion. Observed on the live
-  YOLO_HL_Native rebalance (2026-05-24): BTC and XRP each drifted by exactly one
-  prior order's size.
+  share accounting so each tradeID reports only its own portion. Observed in live
+  trading on a daily rebalance, where two assets each drifted by exactly one prior
+  order's size.
 
 ### Added
 

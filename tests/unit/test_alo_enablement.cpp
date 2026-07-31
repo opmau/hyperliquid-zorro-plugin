@@ -3,11 +3,11 @@
 //=============================================================================
 // PREVENTS BUGS: OPM-791..OPM-798 (epic OPM-790)
 //
-// Background: no ALO order had EVER reached the exchange from this stack. All
-// 148 live orders in Zorro\Log\YOLO_HL_Native_V2_real.log went out
-// "tif":"Ioc" despite the strategy calling brokerCommand(50012,"Alo") since
-// February. These tests lock in each of the fixes that made maker execution
-// reachable.
+// Background: post-only orders never reached the exchange. In live trading every
+// order went out with "tif":"Ioc" even when the strategy had called
+// brokerCommand(50012,"Alo"), because Zorro re-sends SET_ORDERTYPE at every
+// order entry and can only derive a non-ALO type. These tests lock in each of
+// the fixes that made maker execution reachable.
 //
 // TESTS (against the REAL implementations, not simulations, wherever the code
 // is free of Zorro/HTTP dependencies):

@@ -176,6 +176,7 @@ TEST_CASE(schedule_cancel_hash_with_vs_without_time) {
 //=============================================================================
 // SIGNING VECTOR TESTS (verified against Python SDK signing_test.py:248-273)
 //=============================================================================
+// check-public-safety: allow private-key (published SDK signing vectors)
 // Private key: 0x0123456789012345678901234567890123456789012345678901234567890123
 // These tests verify end-to-end: msgpack → keccak → EIP-712 → secp256k1 sign
 //

@@ -26,7 +26,7 @@ No Hyperliquid auth needed — `l2Book` and `trades` are public channels.
 ### Run
 
 ```powershell
-# 30-min run, default 10 mainnet coins (matches YOLO_HL_Native asset set)
+# 30-min run over a default basket of 10 mainnet coins
 python scripts/diagnostics/hl_ws_cadence.py
 
 # Shorter run for a quick check
@@ -62,12 +62,12 @@ Press Ctrl-C any time to stop early — the summary prints on shutdown.
 
 For WS-cadence root-cause confirmation:
 
-1. **Baseline run alone** (~30 min, mainnet, during the same time of day as the
-   real YOLO session). Establishes the ground truth for what HL delivers from
-   this network/machine.
+1. **Baseline run alone** (~30 min, mainnet, at the same time of day as the
+   strategy session you are investigating). Establishes the ground truth for
+   what Hyperliquid delivers from this network and machine.
 2. **Parallel run with the plugin** (~30 min, both running simultaneously).
-   Compare the script's CSV per-coin gaps against the plugin's
-   `Log/YOLO_HL_Native.log` cache-age values from the same wall-clock window.
+   Compare the script's CSV per-coin gaps against the cache-age values in the
+   strategy's Zorro log over the same wall-clock window.
 3. **Decision tree:**
    - If both see 2-6 s per-coin gaps → confirmed HL/network behavior; the
      plugin is reporting reality. Fix at the call site (raise threshold or
