@@ -43,16 +43,29 @@ struct PriceData {
 
 // Account data from webData3/clearinghouseState subscription
 struct AccountData {
-    double accountValue;      // Perps equity (from marginSummary/crossMarginSummary)
+    double accountValue;      // Perps equity, main dex only (marginSummary/crossMarginSummary)
     double totalMarginUsed;   // Margin currently used
-    double withdrawable;      // Available to withdraw
+    double withdrawable;      // Available to withdraw. Reads 0.0 on unified
+                              // accounts even when equity is free — do not
+                              // treat it as cash there. [OPM-824]
     double totalNtlPos;       // Total notional position value
-    double spotUSDC;          // Spot USDC balance (from spotClearinghouseState)
+
+    // --- spotClearinghouseState (HTTP only; no WS channel) ---
+    double spotUSDC;          // Spot USDC `total`. On a unified account this
+                              // IS the whole collateral pool. [OPM-824]
+    double spotAvailAfterMaint;  // HL's own tokenToAvailableAfterMaintenance
+                                 // for USDC (0 when not a unified pool)
+    bool spotUnifiedPool;     // Response carried tokenToAvailableAfterMaintenance,
+                              // i.e. spot collateralizes perps
+    bool spotDataValid;       // A spot response was parsed. Distinguishes
+                              // "0 USDC" from "never fetched".
     DWORD timestamp;
     DWORD spotTimestamp;      // When spot data was last fetched
 
     AccountData() : accountValue(0), totalMarginUsed(0), withdrawable(0),
-                   totalNtlPos(0), spotUSDC(0), timestamp(0), spotTimestamp(0) {}
+                   totalNtlPos(0), spotUSDC(0), spotAvailAfterMaint(0),
+                   spotUnifiedPool(false), spotDataValid(false),
+                   timestamp(0), spotTimestamp(0) {}
 };
 
 // Position data from clearinghouseState subscription
