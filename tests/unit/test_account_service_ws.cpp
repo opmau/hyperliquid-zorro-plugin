@@ -211,12 +211,12 @@ TEST_CASE(ws_getbalance_with_spot_usdc_unified) {
     // perps-only AND dex-0 only, so it is not added and not used.
     ws::PriceCache cache;
     cache.setAccountData(10500.0, 1000.0, 9000.0, 30000.0);
-    cache.setSpotState(23942.44, 17397.16, true);
+    cache.setSpotState(20000.00, 15000.00, true);
 
     AcctWs::Balance bal = AcctWs::getBalance(cache, true, 60000);
     ASSERT_TRUE(bal.dataReceived);
-    // 23942.44 — not 10500 (perps only) and not 34442.44 (the sum)
-    ASSERT_FLOAT_EQ_TOL(bal.accountValue, 23942.44, 0.01);
+    // 20000.00 — not 10500 (perps only) and not 30500.00 (the sum)
+    ASSERT_FLOAT_EQ_TOL(bal.accountValue, 20000.00, 0.01);
     ASSERT_FLOAT_EQ_TOL(bal.withdrawable, 9000.0, 0.01);
 }
 
