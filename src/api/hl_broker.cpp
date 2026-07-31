@@ -430,6 +430,10 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
         hl::trading::setOrderType("Ioc");
         hl::trading::clearLastOrderError();
 
+        // [OPM-824] Forget the abstraction mode — the next login may be a
+        // different account, on a different collateral model.
+        hl::account::resetAbstractionMode();
+
         // [OPM-550] Flush async log queue BEFORE tearing down the WS manager
         // so any final messages reach Zorro while BrokerMessage is still valid.
         hl::g_logger.flush();

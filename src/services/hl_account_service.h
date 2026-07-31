@@ -28,12 +28,19 @@ namespace account {
 // ACCOUNT STATE
 // =============================================================================
 
-/// Account balance data (from clearinghouseState)
+/// Account balance data (from clearinghouseState + spotClearinghouseState)
 struct Balance {
-    double accountValue = 0.0;    // Total equity (withdrawable + unrealized PnL)
-    double withdrawable = 0.0;    // Cash balance (withdrawable)
+    double accountValue = 0.0;    // Total tradeable equity. Source depends on
+                                  // the collateral model — see getBalance().
+    double withdrawable = 0.0;    // Raw `withdrawable` from the API. Reads 0.0
+                                  // on unified accounts regardless of free
+                                  // equity — prefer freeCollateral. [OPM-824]
     double marginUsed = 0.0;      // Total margin currently used
     double totalNotional = 0.0;   // Total notional position value
+    double freeCollateral = 0.0;  // Equity available after maintenance margin.
+                                  // Unified: HL's own figure. Otherwise
+                                  // accountValue - marginUsed.
+    bool unifiedCollateral = false;  // Spot USDC is the collateral pool
     uint32_t timestamp = 0;       // GetTickCount when updated
     bool dataReceived = false;    // WS delivered data (true even if balance is 0)
 
@@ -59,11 +66,6 @@ bool hasRealtimeBalance(uint32_t maxAgeMs = 60000);
 /// Force refresh account data via HTTP (perps clearinghouseState)
 /// @return true if successful
 bool refreshBalance();
-
-/// Fetch spot USDC balance via HTTP (spotClearinghouseState)
-/// Unified accounts hold USDC on the spot side — not visible in perps data.
-/// @return Spot USDC balance (0 if query fails or no spot holdings)
-double refreshSpotBalance();
 
 // =============================================================================
 // POSITION DATA
@@ -173,24 +175,8 @@ void subscribeAccountData();
 /// @param perpDex PerpDex name (e.g., "xyz"). NULL or empty is a no-op.
 void markPerpDexActive(const char* perpDex);
 
-// =============================================================================
-// ACCOUNT ABSTRACTION MODE [OPM-200]
-// =============================================================================
-
-/// Hyperliquid account abstraction mode.
-/// Determines how perps, spot, and perpDex capital is pooled.
-/// - Standard (disabled): Separate pools — spot USDC NOT in clearinghouseState
-/// - Unified: Single pool — spot USDC IS included in crossMarginSummary
-/// - PortfolioMargin: Multi-collateral — spot USDC IS included
-enum class AbstractionMode { Unknown, Standard, Unified, PortfolioMargin };
-
-/// Query the user's account abstraction mode via HTTP (userAbstraction endpoint).
-/// Should be called once at login. Result is cached for the session.
-/// @return The detected mode (Unknown if query fails)
-AbstractionMode queryAbstractionMode();
-
-/// Get the cached abstraction mode (from last queryAbstractionMode call).
-AbstractionMode getAbstractionMode();
+// Account abstraction mode and spotClearinghouseState now live in
+// hl_account_spot.h. [OPM-824]
 
 // =============================================================================
 // ADDRESS VALIDATION

@@ -72,7 +72,12 @@ public:
 
     void setAccountData(double accValue, double marginUsed,
                        double withdraw, double ntlPos);
-    void setSpotUSDC(double amount);
+
+    /// Publish a parsed spotClearinghouseState response. [OPM-824]
+    /// @param usdcTotal       Spot USDC `total`
+    /// @param availAfterMaint tokenToAvailableAfterMaintenance for USDC, else 0
+    /// @param unifiedPool     Response carried tokenToAvailableAfterMaintenance
+    void setSpotState(double usdcTotal, double availAfterMaint, bool unifiedPool);
     AccountData getAccountData() const;
     DWORD getAccountDataAge() const;
 

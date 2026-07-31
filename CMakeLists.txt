@@ -83,6 +83,7 @@ add_library(hl_services STATIC
     src/services/hl_trading_modify.cpp
     src/services/hl_trading_bracket.cpp
     src/services/hl_account_service.cpp
+    src/services/hl_account_spot.cpp
 )
 target_include_directories(hl_services PUBLIC
     ${CMAKE_SOURCE_DIR}/src/services

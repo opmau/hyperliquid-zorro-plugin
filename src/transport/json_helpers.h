@@ -22,11 +22,15 @@ namespace json {
 
 /// Get a double from a yyjson object, handling both number and string types.
 /// Returns 0.0 if obj is NULL, key not found, or value is null/empty.
+///
+/// Uses yyjson_get_num, NOT yyjson_get_real: get_real returns 0.0 for a JSON
+/// integer, so a whole number such as {"token":150} silently read as zero.
+/// Mostly masked because Hyperliquid encodes its numbers as strings. [OPM-824]
 inline double getDouble(yyjson_val* obj, const char* key) {
     if (!obj) return 0.0;
     yyjson_val* item = yyjson_obj_get(obj, key);
     if (!item) return 0.0;
-    if (yyjson_is_num(item)) return yyjson_get_real(item);
+    if (yyjson_is_num(item)) return yyjson_get_num(item);
     if (yyjson_is_str(item)) return atof(yyjson_get_str(item));
     return 0.0;
 }
@@ -77,12 +81,22 @@ inline bool isNull(yyjson_val* item) {
 }
 
 /// Get a double directly from a yyjson_val (not by key lookup).
-/// Handles HL's string-encoded numbers.
+/// Handles HL's string-encoded numbers. See getDouble on get_num vs get_real.
 inline double valToDouble(yyjson_val* item) {
     if (!item) return 0.0;
-    if (yyjson_is_num(item)) return yyjson_get_real(item);
+    if (yyjson_is_num(item)) return yyjson_get_num(item);
     if (yyjson_is_str(item)) return atof(yyjson_get_str(item));
     return 0.0;
+}
+
+/// Get a 64-bit integer directly from a yyjson_val (not by key lookup).
+/// Handles ints, reals and HL's string-encoded numbers.
+inline long long valToInt64(yyjson_val* item) {
+    if (!item) return 0;
+    if (yyjson_is_int(item)) return (long long)yyjson_get_sint(item);
+    if (yyjson_is_real(item)) return (long long)yyjson_get_real(item);
+    if (yyjson_is_str(item)) return _atoi64(yyjson_get_str(item));
+    return 0;
 }
 
 /// Get a boolean from a yyjson object. Returns defaultVal if not found.

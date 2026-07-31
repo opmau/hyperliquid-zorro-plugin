@@ -11,6 +11,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Account balance on unified and portfolio-margin accounts.** `BrokerAccount`
+  reported `clearinghouseState.marginSummary.accountValue`, which covers perps
+  only — and only on the main dex. On an account using Hyperliquid's unified or
+  portfolio-margin abstraction, a single spot USDC pool collateralizes
+  everything, so that figure is not the account's equity. The plugin now reports
+  the spot USDC `total`, which Hyperliquid marks to market continuously and
+  which already includes unrealized PnL from every perp dex.
+
+  **This raises the balance Zorro sees, so a strategy sizing from `Balance` or
+  `Equity` will trade larger.** Check your position sizing before deploying.
+  Two live examples: an account with 10 open positions went from 15,372 to
+  24,114 (+57%), and an account funded entirely on the spot side went from `0`
+  to its true 806.55.
+
+  A balance of `0` also used to trigger the zero-balance guard, which halts the
+  strategy with a message blaming the wallet address — so a correctly configured
+  account holding only spot collateral could not trade at all.
+
+  Accounts on the `disabled` and `default` abstraction modes are unaffected in
+  substance: spot and perps remain separate pools and are still summed.
+
+  Staked HYPE is deliberately **not** counted. Hyperliquid's own `portfolio`
+  endpoint includes it, but it is delegated to a validator and cannot back a
+  perp position; counting it would over-report tradeable equity.
+
+- **`default` account abstraction mode was not recognized.** Only `disabled`,
+  `unifiedAccount` and `portfolioMargin` were matched, so `default` fell through
+  to "unknown" and was then treated as unified. The mode is also now queried on
+  every login path — a login that fell back to HTTP used to skip the query
+  entirely. The balance calculation no longer depends on the mode string at all:
+  it keys off whether the spot response carries
+  `tokenToAvailableAfterMaintenance`, which is present exactly when spot
+  collateralizes perps.
+
+- **JSON integers were parsed as `0.0`.** The shared `getDouble`/`valToDouble`
+  helpers used yyjson's `get_real`, which returns `0.0` for a whole number such
+  as `{"token":150}`. Mostly masked because Hyperliquid encodes its numbers as
+  strings, but it made a portfolio-margin account read another token's
+  collateral figure as its own.
+
+### Added
+
+- `Balance::freeCollateral` — equity available after maintenance margin. On
+  unified accounts this is Hyperliquid's own `tokenToAvailableAfterMaintenance`
+  figure rather than a derived one. Note that the raw `withdrawable` field reads
+  `0.0` on unified accounts regardless of how much equity is free; it is no
+  longer a usable proxy for available funds.
+
 ## [2.1.0] — 2026-07-28
 
 Adds working post-only (ALO) maker execution, reports exchange order rejects to

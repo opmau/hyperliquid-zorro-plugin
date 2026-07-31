@@ -5,6 +5,7 @@
 //=============================================================================
 
 #include "hl_account_service.h"
+#include "hl_account_spot.h"
 #include "hl_meta.h"
 #include "../foundation/hl_globals.h"
 #include "../foundation/hl_utils.h"
@@ -12,19 +13,12 @@
 #include "../transport/ws_price_cache.h"
 #include "../transport/ws_manager.h"
 #include "../transport/ws_parsers.h"
-#include "../transport/json_helpers.h"
 #include <cstdio>
 #include <cstring>
 #include <set>
 
 namespace hl {
 namespace account {
-
-// =============================================================================
-// SESSION STATE
-// =============================================================================
-
-static AbstractionMode s_abstractionMode = AbstractionMode::Unknown;
 
 // =============================================================================
 // LOGGING HELPER
@@ -49,6 +43,26 @@ bool Balance::isStale(uint32_t maxAgeMs) const {
     return age > maxAgeMs;
 }
 
+// Adapt the cached WS/HTTP account data to computeCollateral(), which owns the
+// whole equity decision and is unit-tested directly. [OPM-824]
+static void applyCollateralModel(const ws::AccountData& accData, Balance& out) {
+    SpotState spot;
+    spot.usdcTotal      = accData.spotUSDC;
+    spot.availAfterMaint = accData.spotAvailAfterMaint;
+    spot.unifiedPool    = accData.spotUnifiedPool;
+    spot.valid          = accData.spotDataValid;
+
+    CollateralView view = computeCollateral(accData.accountValue,
+                                            accData.totalMarginUsed, spot);
+    out.accountValue      = view.equity;
+    out.freeCollateral    = view.freeCollateral;
+    out.unifiedCollateral = view.unified;
+
+    if (!spot.valid) {
+        logMsg(1, "getBalance", "No spot data — falling back to perps equity");
+    }
+}
+
 Balance getBalance(uint32_t maxAgeMs) {
     Balance result;
 
@@ -62,14 +76,7 @@ Balance getBalance(uint32_t maxAgeMs) {
         // age == MAXDWORD means WS never delivered clearinghouseState
         if (age < maxAgeMs) {
             result.dataReceived = true;
-            // [OPM-200] Only add spot USDC for standard accounts.
-            // Unified/PortfolioMargin: crossMarginSummary.accountValue already includes spot.
-            // Unknown (query failure): assume unified (the default) to avoid inflation.
-            if (s_abstractionMode == AbstractionMode::Standard) {
-                result.accountValue = accData.accountValue + accData.spotUSDC;
-            } else {
-                result.accountValue = accData.accountValue;
-            }
+            applyCollateralModel(accData, result);
             result.withdrawable = accData.withdrawable;
             result.marginUsed = accData.totalMarginUsed;
             result.totalNotional = accData.totalNtlPos;
@@ -77,9 +84,11 @@ Balance getBalance(uint32_t maxAgeMs) {
 
             if (g_config.diagLevel >= 2) {
                 char msg[256];
-                sprintf_s(msg, "WS: perps=%.2f spot=%.2f total=%.2f margin=%.2f (age=%dms)",
+                sprintf_s(msg, "WS: perps=%.2f spot=%.2f equity=%.2f free=%.2f "
+                               "margin=%.2f unified=%s (age=%dms)",
                          accData.accountValue, accData.spotUSDC,
-                         result.accountValue, result.marginUsed, age);
+                         result.accountValue, result.freeCollateral, result.marginUsed,
+                         result.unifiedCollateral ? "yes" : "no", age);
                 logMsg(2, "getBalance", msg);
             }
             return result;
@@ -155,68 +164,6 @@ bool refreshBalance() {
     }
 
     return true;
-}
-
-double refreshSpotBalance() {
-    // Fetch spotClearinghouseState via HTTP
-    // Response: {"balances":[{"coin":"USDC","token":0,"hold":"0.0","total":"204.50",...},...]
-    char body[256];
-    sprintf_s(body, "{\"type\":\"spotClearinghouseState\",\"user\":\"%s\"}", g_config.walletAddress);
-
-    http::Response resp = http::infoPost(body, false);
-    if (!resp.success() || resp.body.empty()) {
-        logMsg(1, "refreshSpotBalance", "HTTP request failed or empty");
-        return 0.0;
-    }
-
-    // Log raw response at level 1
-    if (g_config.diagLevel >= 1) {
-        char snippet[512];
-        strncpy_s(snippet, resp.body.c_str(), sizeof(snippet) - 1);
-        snippet[sizeof(snippet) - 1] = '\0';
-        g_logger.logf(1, "refreshSpotBalance: HTTP response (%zu bytes): %s",
-                       resp.body.length(), snippet);
-    }
-
-    // Parse with yyjson
-    yyjson_doc* doc = yyjson_read(resp.body.c_str(), resp.body.length(), 0);
-    if (!doc) {
-        logMsg(1, "refreshSpotBalance", "JSON parse error");
-        return 0.0;
-    }
-
-    yyjson_val* root = yyjson_doc_get_root(doc);
-    yyjson_val* balances = json::getArray(root, "balances");
-
-    double usdcTotal = 0.0;
-    if (balances) {
-        size_t idx, max;
-        yyjson_val* item;
-        yyjson_arr_foreach(balances, idx, max, item) {
-            char coin[32] = {0};
-            if (json::getString(item, "coin", coin, sizeof(coin))) {
-                if (_stricmp(coin, "USDC") == 0) {
-                    usdcTotal = json::getDouble(item, "total");
-                    break;
-                }
-            }
-        }
-    }
-    yyjson_doc_free(doc);
-
-    // Store in PriceCache
-    if (g_priceCache) {
-        auto* cache = reinterpret_cast<hl::ws::PriceCache*>(g_priceCache);
-        cache->setSpotUSDC(usdcTotal);
-    }
-
-    if (g_config.diagLevel >= 1) {
-        char msg[128];
-        sprintf_s(msg, "Spot USDC balance: %.2f", usdcTotal);
-        logMsg(1, "refreshSpotBalance", msg);
-    }
-
-    return usdcTotal;
 }
 
 // =============================================================================
@@ -587,55 +534,6 @@ void subscribeAccountData() {
     if (g_config.diagLevel >= 1) {
         logMsg(1, "subscribeAccountData", "Subscribed to clearinghouseState, openOrders, userFills");
     }
-}
-
-// =============================================================================
-// ACCOUNT ABSTRACTION MODE [OPM-200]
-// =============================================================================
-
-AbstractionMode queryAbstractionMode() {
-    if (!g_config.walletAddress[0]) {
-        s_abstractionMode = AbstractionMode::Unknown;
-        return s_abstractionMode;
-    }
-
-    char body[256];
-    sprintf_s(body, "{\"type\":\"userAbstraction\",\"user\":\"%s\"}", g_config.walletAddress);
-
-    http::Response resp = http::infoPost(body, false);
-    if (!resp.success() || resp.body.empty()) {
-        logMsg(1, "queryAbstractionMode", "HTTP request failed, assuming Unified (default)");
-        s_abstractionMode = AbstractionMode::Unknown;
-        return s_abstractionMode;
-    }
-
-    if (g_config.diagLevel >= 1) {
-        g_logger.logf(1, "queryAbstractionMode: response=%s", resp.body.c_str());
-    }
-
-    // Response is a JSON string value: "disabled", "unifiedAccount", "portfolioMargin"
-    if (resp.body.find("disabled") != std::string::npos) {
-        s_abstractionMode = AbstractionMode::Standard;
-    } else if (resp.body.find("portfolioMargin") != std::string::npos) {
-        s_abstractionMode = AbstractionMode::PortfolioMargin;
-    } else if (resp.body.find("unifiedAccount") != std::string::npos) {
-        s_abstractionMode = AbstractionMode::Unified;
-    } else {
-        logMsg(1, "queryAbstractionMode", "Unrecognized response, assuming Unified");
-        s_abstractionMode = AbstractionMode::Unknown;
-    }
-
-    const char* modeStr =
-        (s_abstractionMode == AbstractionMode::Standard) ? "Standard" :
-        (s_abstractionMode == AbstractionMode::Unified) ? "Unified" :
-        (s_abstractionMode == AbstractionMode::PortfolioMargin) ? "PortfolioMargin" : "Unknown";
-    g_logger.logf(1, "Account abstraction mode: %s", modeStr);
-
-    return s_abstractionMode;
-}
-
-AbstractionMode getAbstractionMode() {
-    return s_abstractionMode;
 }
 
 // =============================================================================

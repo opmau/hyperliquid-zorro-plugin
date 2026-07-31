@@ -58,6 +58,7 @@
 #include "../services/hl_trading_response.h"
 #include "../services/hl_trading_openorders.h"
 #include "../services/hl_account_service.h"
+#include "../services/hl_account_spot.h"
 #include "../services/hl_meta.h"
 #include "../transport/ws_manager.h"
 #include "../transport/ws_price_cache.h"
