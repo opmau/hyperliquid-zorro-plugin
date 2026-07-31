@@ -90,6 +90,7 @@
 #define HL_EXPORT_ASSETS    50001
 #define HL_EXPORT_META      50002
 #define HL_EXPORT_ACCOUNT   50003
+#define HL_SET_EXPORT_NFA   50004  // NFA/compliance column for 50003's template [OPM-801]
 #define HL_GET_FUNDING_RATE     50031  // Query current hourly funding rate for a coin [OPM-172]
 #define HL_FORCE_WS_DISCONNECT 50030  // Debug: force WS disconnect to test reconnect [OPM-170]
 #define HL_SCHEDULE_CANCEL     50032  // Dead man's switch: param=seconds from now, 0=clear [OPM-83]
