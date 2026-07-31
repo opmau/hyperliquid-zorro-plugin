@@ -58,30 +58,53 @@ FILE_WAIVER = re.compile(
     r"check-public-safety:\s*allow\s+([a-z][a-z-]*)\s*\(([^)]+)\)"
 )
 
-BUILTIN_RULES: list[tuple[str, str, str]] = [
+# Rules are (name, pattern, advice, scope). `scope` is a tuple of path prefixes
+# the rule applies to, or None for the whole repository.
+BUILTIN_RULES: list[tuple[str, str, str, tuple[str, ...] | None]] = [
     (
         "developer-home-path",
         r"[A-Za-z]:[\\/]+Users[\\/]+[A-Za-z0-9._-]+",
         "Absolute path into a developer home directory. Use a relative path or "
         "an environment variable such as %USERPROFILE%.",
+        None,
     ),
     (
         "developer-home-path",
         r"/[a-z]/Users/[A-Za-z0-9._-]+",
         "Absolute MSYS path into a developer home directory. Use a relative "
         "path or an environment variable.",
+        None,
     ),
     (
         "private-key",
         r"0x[0-9a-fA-F]{64}\b",
         "32-byte value in private-key form. Never commit key material; if this "
         f"is a published test vector, label the line '{ALLOW_MARKER}'.",
+        None,
     ),
     (
         "secret-assignment",
         r"(?i)\b(private_key|secret_key|api_key|api_token|access_token|password)"
         r"\s*[=:]\s*[\"']?[A-Za-z0-9_\-./+]{12,}",
         "Assignment of a credential-shaped value.",
+        None,
+    ),
+    (
+        "tracker-id-in-output",
+        r"\"[^\"]*\[[A-Z]{2,5}-\d+\][^\"]*\"",
+        "Issue-tracker id inside a string literal. Log lines and error messages "
+        "are read by users, who cannot open the tracker. Keep the id in a "
+        "comment if it is useful, not in program output.",
+        ("src/",),
+    ),
+    (
+        "untracked-path-reference",
+        r"(?:^|[\s(\"'])(?:docs/hyperliquid-api/|docs/hyperliquid_docs/|"
+        r"docs/zorro_docs/|legacy/|refs/hyperliquid)",
+        "Reference to a path that is not tracked in this repository, so it is a "
+        "dead link for any reader. Cite the upstream public documentation "
+        "instead, or describe the rule inline.",
+        None,
     ),
 ]
 
@@ -118,6 +141,7 @@ def load_private_terms(root: Path) -> list[tuple[str, str, str]]:
             term,
             "Matches a term from the private deny list. Describe the observable "
             "behaviour instead, with no reference to the private source.",
+            None,
         ))
     return rules
 
@@ -149,8 +173,10 @@ def scan(text: str, path: str, rules) -> list[tuple[str, int, str, str, str]]:
     for lineno, line in enumerate(lines, 1):
         if ALLOW_MARKER in line:
             continue
-        for name, pattern, advice in rules:
+        for name, pattern, advice, scope in rules:
             if name in waived:
+                continue
+            if scope and not path.replace("\\", "/").startswith(scope):
                 continue
             match = re.search(pattern, line)
             if match:

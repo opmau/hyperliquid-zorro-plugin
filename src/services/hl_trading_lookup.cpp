@@ -124,8 +124,7 @@ bool updateOrderByCloid(const char* cloid, double filledSize, double avgPrice, O
 // =============================================================================
 // ORDER STATUS QUERY (three-state reconciliation) [OPM-89]
 // =============================================================================
-// Ported from legacy/Hyperliquid_Native.cpp:748-901.
-// Verified against docs/hyperliquid-api/05-info-endpoint.md:285-439.
+// Verified against Hyperliquid's /info orderStatus documentation.
 
 CloidQueryResult queryOrderByCloid(const char* cloid) {
     CloidQueryResult result;

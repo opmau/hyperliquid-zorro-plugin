@@ -114,7 +114,7 @@ enum class PriceRound { Nearest, Down, Up };
 // 10^(floor(log10(px)) - 4) that also fit within (MAX_DECIMALS - szDecimals)
 // decimal places — PLUS every integer, which HL accepts regardless of
 // significant figures ("123456 is a valid price even though 12345.6 is not",
-// docs/hyperliquid-api/03-tick-and-lot-size.md). Above 100000 the sig-fig grid
+// Hyperliquid tick-and-lot-size docs). Above 100000 the sig-fig grid
 // is coarser than 1, so the integer grid is both valid and finer and we snap
 // to it — that is what makes $1-level maker quotes on BTC expressible.
 double roundPriceForExchange(double price, int szDecimals, int maxDecimals = 6,

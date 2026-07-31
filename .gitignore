@@ -1,3 +1,5 @@
+# check-public-safety: allow untracked-path-reference (naming untracked paths is this file's purpose)
+
 # Zorro Log Files
 *.log
 Log/

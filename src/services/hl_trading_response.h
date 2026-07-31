@@ -65,7 +65,7 @@ enum OrderErrorClass {
 };
 
 /// Classify an exchange reject string into an OrderErrorClass.
-/// Matches the error strings in docs/hyperliquid-api/08-error-responses.md.
+/// Matches the error strings documented in Hyperliquid's API reference.
 int classifyOrderError(const char* errorText);
 
 /// Record the most recent order reject (also called internally on every reject).
