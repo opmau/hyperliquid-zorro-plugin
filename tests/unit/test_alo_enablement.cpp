@@ -633,6 +633,63 @@ TEST_CASE(cr8_open_order_unaffected_by_the_reorder) {
 }
 
 //=============================================================================
+// CR-9: modify TIF must satisfy the always_place=false rule  [real impl]
+//=============================================================================
+// packBatchModifyAction omits the action's `a` (always_place) field, because
+// the exchange docs require it: "a must be skipped if false, i.e. actions
+// hashed with a: false will be rejected". Omitting it means always_place is
+// false, and that branch constrains the replacement order:
+//
+//   "When always_place = false the new order must be a non-trigger order, and
+//    must have TIF = ALO or a non-executable order with TIF = GTC. In the
+//    latter case, TIF of the new order is overridden to ALO."
+//     -- docs/hyperliquid-api/06-exchange-endpoint.md
+//
+// So IOC is rejected by the exchange unconditionally. 50044 hardcodes ALO, but
+// 50042 (HL_MODIFY_ORDER) forwards a caller-supplied TIF whose struct default
+// is Gtc — an IOC modify used to go out and come back as an opaque failure.
+
+TEST_CASE(cr9_ioc_is_never_valid_for_modify) {
+    // Unconditionally rejected by HL: guard it before spending a round trip.
+    ASSERT_FALSE(isTifValidForModify("Ioc"));
+    ASSERT_FALSE(isTifValidForModify("ioc"));   // casing must not smuggle it through
+    ASSERT_FALSE(isTifValidForModify("IOC"));
+}
+
+TEST_CASE(cr9_alo_is_valid_for_modify) {
+    // The reprice path. Explicitly allowed by the always_place=false branch.
+    ASSERT_TRUE(isTifValidForModify("Alo"));
+    ASSERT_TRUE(isTifValidForModify("alo"));
+    ASSERT_TRUE(isTifValidForModify("ALO"));
+}
+
+TEST_CASE(cr9_gtc_is_valid_for_modify) {
+    // Conditionally accepted — HL takes a non-executable GTC and overrides it
+    // to ALO. Executability is not knowable client-side, so this is not a
+    // client-side reject; the exchange decides.
+    ASSERT_TRUE(isTifValidForModify("Gtc"));
+    ASSERT_TRUE(isTifValidForModify("gtc"));
+}
+
+TEST_CASE(cr9_invalid_tif_is_rejected_for_modify) {
+    ASSERT_FALSE(isTifValidForModify("Fok"));
+    ASSERT_FALSE(isTifValidForModify(""));
+    ASSERT_FALSE(isTifValidForModify(nullptr));
+    ASSERT_FALSE(isTifValidForModify("Alo "));  // no silent trimming, as canonicalTif
+}
+
+TEST_CASE(cr9_modify_validity_agrees_with_canonical_tif) {
+    // Anything canonicalTif rejects must also be invalid for modify — the guard
+    // narrows the valid set, it must never widen it.
+    const char* junk[] = {"Fok", "", "Alo ", "Post", "gtc "};
+    for (int i = 0; i < 5; ++i) {
+        if (canonicalTif(junk[i]) == nullptr) {
+            ASSERT_FALSE(isTifValidForModify(junk[i]));
+        }
+    }
+}
+
+//=============================================================================
 // MAIN
 //=============================================================================
 
@@ -702,6 +759,13 @@ int main() {
     RUN_TEST(cr8_cancelled_after_full_close_is_nay_minus_1);
     RUN_TEST(cr8_sublot_residual_does_not_resurrect_a_trade);
     RUN_TEST(cr8_open_order_unaffected_by_the_reorder);
+
+    printf("\n--- CR-9: modify TIF vs always_place=false ---\n");
+    RUN_TEST(cr9_ioc_is_never_valid_for_modify);
+    RUN_TEST(cr9_alo_is_valid_for_modify);
+    RUN_TEST(cr9_gtc_is_valid_for_modify);
+    RUN_TEST(cr9_invalid_tif_is_rejected_for_modify);
+    RUN_TEST(cr9_modify_validity_agrees_with_canonical_tif);
 
     return printTestSummary();
 }
