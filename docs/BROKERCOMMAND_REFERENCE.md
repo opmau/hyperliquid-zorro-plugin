@@ -139,6 +139,20 @@ if (!id) {
 structs contain `std::string` members, so they are reachable only from C++.
 `50044` is the Lite-C-callable equivalent of `50042`.
 
+#### Modify replaces with a maker order, never an IOC
+
+Both modify paths omit the action's `a` (`always_place`) field, because
+Hyperliquid rejects any action hashed with `a: false`. `always_place` is
+therefore false, and that branch constrains the replacement order: it must be
+`Alo`, or a **non-executable** `Gtc` that the exchange then rewrites to `Alo`.
+
+`50044` always sends `Alo`, so it is unaffected. `50042` forwards whatever TIF
+the caller put in its `ModifyRequest` — whose struct default is `Gtc` — so an
+`Ioc` modify was previously signed, sent, and rejected by the exchange with no
+indication of why. It is now refused locally with an explanatory error before
+the round trip. A `Gtc` modify is still forwarded: whether it is executable is
+a question about the current book, which only the exchange can answer.
+
 #### `50044` — reprice a resting order
 
 ```c
@@ -157,9 +171,16 @@ int r = brokerCommand(50044, params);
 | `-1` | Trade ID is not tracked |
 | `-2` | Order already filled or cancelled — nothing to move |
 
-Uses Hyperliquid's `batchModify`, which preserves queue priority. Prefer this
-over cancel-and-replace: one round trip instead of two, and no window in which
-the order could fill between the cancel and the replacement.
+Uses Hyperliquid's `batchModify`. Prefer it over cancel-and-replace: one round
+trip instead of two, and no window in which the order could fill between the
+cancel and the replacement.
+
+It does **not** preserve queue position, and nothing in the exchange docs says
+it does. A reprice moves the order to a different price level, where it is a
+new arrival like any other. Absent a priority fee, which this plugin never
+sends, a requote joins the **back** of its new level — see
+`docs/hyperliquid-api/12a-priority-fees.md`. Budget reprices accordingly rather
+than assuming they are free in queue terms.
 
 `-2` is the expected outcome when a reprice races a fill. Treat it as "the
 order is gone, re-read the position", not as an error.
@@ -208,7 +229,14 @@ Note that `14`/`15` switch Zorro's close path from `BrokerSell2` to
 brokerCommand(50032, 60);            // dead-man's switch: cancel all in 60s
 brokerCommand(50012, "Alo");         // sticky — survives Zorro's auto-call
 
-OrderLimit = passivePrice;
+// Derive a price that cannot cross. An ALO order that would match is
+// cancelled outright, so this is the single most important step.
+brokerCommand(SET_SYMBOL, "BTC");
+var bid = brokerCommand(GET_PRICE, 6);
+var ask = brokerCommand(GET_PRICE, 5);
+if (bid <= 0 || ask <= 0) return;    // hard 0.0 means no data — never guess
+
+OrderLimit = bid;                    // buy: join the bid. Sell: use ask.
 int id = enterLong();
 
 if (!id) {
@@ -224,10 +252,13 @@ while (waited < timeout) {
     waited += 200;
 }
 
-// Still unfilled: reprice rather than cancel/replace.
-var params[3];
-params[0] = id; params[1] = newPrice; params[2] = 0;
-if (brokerCommand(50044, params) == -2) { /* it filled — re-read position */ }
+// Still unfilled: reprice rather than cancel/replace. Cap the attempts.
+if (reprices < maxReprices) {
+    var params[3];
+    params[0] = id; params[1] = brokerCommand(GET_PRICE, 6); params[2] = 0;
+    if (brokerCommand(50044, params) == -2) { /* it filled — re-read position */ }
+    reprices += 1;
+}
 
 // Give up: cancel everything resting on this symbol.
 brokerCommand(SET_SYMBOL, "BTC");
@@ -236,6 +267,36 @@ brokerCommand(DO_CANCEL, 0);
 brokerCommand(50012, "Ioc");         // release the sticky override
 brokerCommand(50032, 0);             // disarm the dead-man's switch
 ```
+
+### Choosing the passive price
+
+`GET_PRICE` needs `SET_SYMBOL` first and returns a hard `0.0` when the cache
+has nothing — treat that as "do not trade this bar", never as a price.
+
+| Side | Post at             | Crossing price that gets you `BadAloPx` |
+|------|---------------------|-----------------------------------------|
+| Buy  | bid, `GET_PRICE(6)` | anything at or above the ask            |
+| Sell | ask, `GET_PRICE(5)` | anything at or below the bid            |
+
+Joining your own side is safe; reaching across is what triggers the reject.
+The plugin rounds side-aware (buys floor, sells ceil), so rounding alone will
+never push your quote across the spread — but it cannot rescue a price that was
+already crossing when you passed it.
+
+### Budgeting reprices
+
+Every reprice costs one address-based request, and that budget is earned by
+**filling**, not by waiting: Hyperliquid allows one request per 1 USDC of
+cumulative traded volume since address inception, on top of an initial 10,000.
+Their own worked example is that a 100 USDC order needs a 1% fill rate to break
+even — so roughly 100 reprices per filled 100 USDC order before you are
+spending faster than you earn. Batched actions count as `n` requests here, not
+one.
+
+Exhausting it throttles the address to **one request every 10 seconds**, which
+is a bad state to reach holding an open position. Cap reprices per entry and
+fall back to a taker or to flat, rather than chasing a trend indefinitely. See
+`docs/hyperliquid-api/10-rate-limits.md`.
 
 A close placed while ALO is active rests too. `BrokerSell2` reports
 `*pFill = 0` until it actually fills, and Zorro's position stays open — which
