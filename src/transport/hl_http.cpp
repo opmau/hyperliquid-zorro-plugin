@@ -140,8 +140,42 @@ enum HttpResultCode {
     HTTP_REQUEST_FAILED = 1,
     HTTP_TIMEOUT = 2,
     HTTP_ABORTED = 3,
-    HTTP_EMPTY_RESPONSE = 4
+    HTTP_EMPTY_RESPONSE = 4,
+    HTTP_NULL_BODY = 5
 };
+
+// A completed transfer sometimes carries nothing but a JSON `null` for a
+// request the exchange answers correctly moments later, in bursts that recover
+// on their own. Retry a bounded number of times (NULL_RETRY_LIMIT, declared in
+// the header alongside the contract it documents), then report failure.
+static const int NULL_RETRY_DELAY_MS = 250;
+
+// True when the body holds a bare JSON null and nothing else.
+static bool isBareNullBody(const char* body) {
+    if (!body) return false;
+    while (*body == ' ' || *body == '\t' || *body == '\r' || *body == '\n') ++body;
+    if (strncmp(body, "null", 4) != 0) return false;
+    body += 4;
+    while (*body == ' ' || *body == '\t' || *body == '\r' || *body == '\n') ++body;
+    return *body == '\0';
+}
+
+// Non-blocking pause that lets Zorro process messages, guarded the same way as
+// the wait loop below. Returns false when Zorro asks us to abort.
+static bool napGuarded(int totalMs) {
+    int remaining = totalMs;
+    while (remaining > 0) {
+        int napResult = 0;
+        __try {
+            napResult = nap(10);
+        } __except(EXCEPTION_EXECUTE_HANDLER) {
+            napResult = 0;
+        }
+        if (!napResult) return false;
+        remaining -= 10;
+    }
+    return true;
+}
 
 // Low-level HTTP send with SEH exception handling
 // This function is separate because __try/__except cannot be used in functions
@@ -239,9 +273,36 @@ static Response sendHttpInternal(const char* fullUrl, const char* body,
     // gaps even if the WS thread were healthy.
     DWORD startMs = GetTickCount();
 
-    // Call the low-level function (which has SEH handling)
+    // Call the low-level function (which has SEH handling), retrying a bare
+    // `null` body rather than handing it to the caller as valid data.
     size_t resultSize = 0;
-    HttpResultCode result = sendHttpRaw(fullUrl, body, method, buffer, bufferSize, &resultSize);
+    HttpResultCode result = HTTP_OK;
+    int nullRetries = 0;
+
+    for (;;) {
+        result = sendHttpRaw(fullUrl, body, method, buffer, bufferSize, &resultSize);
+
+        if (result != HTTP_OK || !isBareNullBody(buffer)) break;
+
+        if (nullRetries >= NULL_RETRY_LIMIT) {
+            result = HTTP_NULL_BODY;
+            break;
+        }
+
+        ++nullRetries;
+        g_logger.logf(1, "HTTP null body, retrying (%d/%d): %s",
+                      nullRetries, NULL_RETRY_LIMIT, fullUrl);
+
+        if (!napGuarded(NULL_RETRY_DELAY_MS)) {
+            result = HTTP_ABORTED;
+            break;
+        }
+    }
+
+    if (result == HTTP_OK && nullRetries > 0) {
+        g_logger.logf(1, "HTTP null body recovered after %d retr%s: %s",
+                      nullRetries, (nullRetries == 1) ? "y" : "ies", fullUrl);
+    }
 
     DWORD durationMs = GetTickCount() - startMs;
     if (durationMs >= 5000) {
@@ -281,6 +342,12 @@ static Response sendHttpInternal(const char* fullUrl, const char* body,
             if (g_config.diagLevel >= 1) {
                 g_logger.logf(1, "HTTP empty response: %s", fullUrl);
             }
+            return resp;
+
+        case HTTP_NULL_BODY:
+            resp.error = "Null response body";
+            g_logger.logf(1, "HTTP null body persisted after %d retries, "
+                             "reporting failure: %s", NULL_RETRY_LIMIT, fullUrl);
             return resp;
     }
 
