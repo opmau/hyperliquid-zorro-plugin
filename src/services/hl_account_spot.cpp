@@ -21,6 +21,16 @@ namespace account {
 static AbstractionMode s_abstractionMode = AbstractionMode::Unknown;
 static bool s_abstractionQueried = false;
 
+// Age of the spot snapshot, stamped on successful fetch only — a failed fetch
+// leaves the stamp alone so the next poll retries. Main-thread only, like
+// every caller of this module. [OPM-878]
+static DWORD s_spotFetchTick = 0;
+static bool s_spotEverFetched = false;
+
+// One /info query per expiry at most. Matches the WS staleness window that
+// getBalance() applies to the perps side.
+static const DWORD SPOT_REFRESH_TTL_MS = 60000;
+
 // =============================================================================
 // ACCOUNT ABSTRACTION MODE
 // =============================================================================
@@ -28,6 +38,8 @@ static bool s_abstractionQueried = false;
 void resetAbstractionMode() {
     s_abstractionMode = AbstractionMode::Unknown;
     s_abstractionQueried = false;
+    s_spotFetchTick = 0;
+    s_spotEverFetched = false;
 }
 
 AbstractionMode queryAbstractionMode() {
@@ -123,7 +135,20 @@ double refreshSpotBalance() {
                       spot.availAfterMaint);
     }
 
+    s_spotFetchTick = GetTickCount();
+    s_spotEverFetched = true;
+
     return spot.usdcTotal;
+}
+
+bool ensureSpotFresh() {
+    if (!g_config.walletAddress[0]) return false;
+    if (!spotRefreshDue(GetTickCount(), s_spotFetchTick,
+                        s_spotEverFetched, SPOT_REFRESH_TTL_MS)) {
+        return false;
+    }
+    refreshSpotBalance();
+    return true;
 }
 
 } // namespace account

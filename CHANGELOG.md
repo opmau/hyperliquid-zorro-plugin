@@ -47,6 +47,15 @@ A chase loop calling `50044` must pass `TradeID`, not the value returned by
 
 ### Fixed
 
+- **Reported equity could go stale while the account was active.** The spot
+  balance — the entire equity on a unified or portfolio-margin account, and a
+  component of it otherwise — was refreshed only at login and during quiet
+  periods, so on an account with continuous activity it held its login-time
+  value all session while positions and PnL moved around it. An account poll
+  now re-fetches it once it is older than a minute; if that query fails, the
+  previous value is reported and the next poll retries. Adds at most one
+  balance query per minute to request traffic.
+
 - **Equity was overstated while trades were open, by the amount of their
   unrealized profit.** Every equity figure Hyperliquid publishes is marked to
   market, and `BrokerAccount` reported one as Zorro's *balance* with no
