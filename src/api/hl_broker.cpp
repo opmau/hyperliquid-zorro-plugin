@@ -437,14 +437,17 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
 
         if (accounts) accounts[0] = '\0';
 
-        // Printed regardless of diagnostics: SET_DIAGNOSTICS arrives from the
-        // script only after login, so a level-gated line is absent from
-        // exactly the sessions that need identifying. [OPM-887]
+        // Level 0 always passes the logger gate, so this prints whatever the
+        // diagnostics setting — a level-1 line is absent from exactly the
+        // sessions that need identifying. It must go THROUGH the queue, not
+        // straight to BrokerMessage: at this point in login Zorro has not
+        // opened the strategy log yet, and only messages drained on a later
+        // tick are captured in it. [OPM-887]
         char stamp[40];
         formatBuildStamp(stamp, sizeof(stamp));
         char verMsg[128];
         sprintf_s(verMsg, "%s %s (build %s)", PLUGIN_NAME, PLUGIN_VERSION, stamp);
-        if (hl::g_logger.callback) hl::g_logger.callback(verMsg);
+        hl::g_logger.log(0, verMsg);
 
         return 1;
 
