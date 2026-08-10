@@ -234,16 +234,24 @@ DLLFUNC int BrokerAccount(char* accountId, double* pBalance,
         }
     }
 
-    // Zorro expects: Balance + TradeVal = Equity
-    // For crypto perps: accountValue IS the total equity (includes unrealized PnL).
-    if (pBalance) *pBalance = balance.accountValue;
-    if (pTradeVal) *pTradeVal = 0;
+    // Zorro expects: Balance + TradeVal = Equity, and derives equity from the
+    // balance plus the profit of the trades it tracks. accountValue is marked
+    // to market and already carries that profit, so it cannot serve as the
+    // balance. Report the cash basis and let TradeVal carry the PnL — see
+    // splitEquityForZorro(). [OPM-876]
+    hl::account::ZorroAccountSplit split = hl::account::splitEquityForZorro(
+        balance.accountValue, hl::account::getOpenTradeValue());
+
+    if (pBalance) *pBalance = split.balance;
+    if (pTradeVal) *pTradeVal = split.tradeVal;
     if (pMarginVal) *pMarginVal = balance.marginUsed;
 
     if (hl::g_config.diagLevel >= 2) {
         char msg[256];
-        sprintf_s(msg, "BrokerAccount: balance=%.2f margin=%.2f free=%.2f collateral=%s",
-                  balance.accountValue, balance.marginUsed, balance.freeCollateral,
+        sprintf_s(msg, "BrokerAccount: equity=%.2f balance=%.2f tradeVal=%.2f "
+                       "margin=%.2f free=%.2f collateral=%s",
+                  balance.accountValue, split.balance, split.tradeVal,
+                  balance.marginUsed, balance.freeCollateral,
                   balance.unifiedCollateral ? "unified(spot)" : "separate(perps+spot)");
         hl::g_logger.log(2, msg);
     }

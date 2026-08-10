@@ -125,9 +125,16 @@ void applyFill(const char* coin, double fillSize, double fillPx, bool isBuy);
 // ZORRO HELPERS (for BrokerAccount compatibility)
 // =============================================================================
 
+/// Sum unrealized PnL across every open position.
+///
+/// This is the figure Zorro wants in *pTradeVal, and the amount that has to be
+/// removed from a marked-to-market equity to leave a cash balance. [OPM-876]
+/// @return Summed unrealized PnL (0.0 when flat)
+double getOpenTradeValue();
+
 /// Get Zorro-style account values
-/// @param outBalance Cash balance (withdrawable)
-/// @param outTradeVal Unrealized PnL (equity - cash)
+/// @param outBalance Cash balance (equity less open-trade PnL)
+/// @param outTradeVal Open-trade value (summed unrealized PnL)
 /// @param outMarginVal Margin used
 /// @return true if data is available
 ///

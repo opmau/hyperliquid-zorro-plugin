@@ -17,7 +17,10 @@ portfolio-margin account abstraction modes.
 **Upgrading:** reported `Balance` and `Equity` increase on those accounts, so a
 strategy that sizes positions from either will trade larger. Review your sizing,
 and check the figure against the balance shown in the Hyperliquid interface,
-before deploying.
+before deploying. Note also that `Balance` is now a cash figure: while trades
+are open it differs from the marked-to-market equity by the open profit or
+loss, and it can read negative when open profit exceeds deposited capital.
+`Equity` is the value to compare against the exchange's portfolio display.
 
 A chase loop calling `50044` must pass `TradeID`, not the value returned by
 `enterLong()`/`enterShort()`. See Documentation below.
@@ -43,6 +46,19 @@ A chase loop calling `50044` must pass `TradeID`, not the value returned by
   stake at mark, which cannot margin a perp position.
 
 ### Fixed
+
+- **Equity was overstated while trades were open, by the amount of their
+  unrealized profit.** Every equity figure Hyperliquid publishes is marked to
+  market, and `BrokerAccount` reported one as Zorro's *balance* with no
+  open-trade value, so the profit of open trades was counted a second time in
+  the equity Zorro derives — in live trading, displayed equity exceeded the
+  exchange's portfolio value by exactly the open profit. A strategy sizing from
+  `Equity` oversized in profit and undersized in drawdown.
+
+  `Balance` is now equity less open PnL, with the open PnL reported as the
+  trade value, so `Equity` matches the exchange's portfolio display. On an
+  account that also carries positions opened outside the strategy, the two can
+  still differ by the open profit of those positions.
 
 - **A WebSocket connection that had stopped delivering data was not closed and
   reconnected until a later send on it failed,** which could be long after price

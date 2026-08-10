@@ -184,9 +184,9 @@ TEST_CASE(collateral_unified_uses_spot_total_alone) {
 }
 
 TEST_CASE(collateral_unified_does_not_double_count_pnl) {
-    // Spot USDC total is marked to market and already contains perp PnL.
-    // Verified live: delta(perp accountValue) == delta(spot USDC total).
-    // So moving BOTH by the same amount must move equity by that amount ONCE.
+    // Spot USDC total is marked to market and already contains perp PnL —
+    // it moves one-for-one with the perp accountValue. So moving BOTH by the
+    // same amount must move equity by that amount ONCE.
     SpotState s;
     parseSpotClearinghouseState(SPOT_UNIFIED_MAINNET, strlen(SPOT_UNIFIED_MAINNET), s);
     double before = computeCollateral(12500.00, 10000.00, s).equity;
@@ -276,6 +276,76 @@ TEST_CASE(collateral_unified_with_zero_spot_reports_zero) {
 }
 
 //=============================================================================
+// TEST CASES: Zorro account split [OPM-876]
+//
+// Zorro derives equity from the balance plus the profit of the trades it
+// tracks, so the balance handed over must be a cash basis, not a
+// marked-to-market equity.
+//=============================================================================
+
+TEST_CASE(zorro_split_reconstructs_equity) {
+    ZorroAccountSplit s = splitEquityForZorro(25000.00, 3700.00);
+    ASSERT_FLOAT_EQ_TOL(s.balance + s.tradeVal, 25000.00, 1e-9);
+}
+
+TEST_CASE(zorro_split_removes_open_pnl_from_balance) {
+    // The reported balance is a cash basis: equity less the open profit that
+    // Zorro is going to add back on.
+    ZorroAccountSplit s = splitEquityForZorro(25000.00, 3700.00);
+    ASSERT_FLOAT_EQ_TOL(s.balance, 21300.00, 1e-9);
+    ASSERT_FLOAT_EQ_TOL(s.tradeVal, 3700.00, 1e-9);
+}
+
+TEST_CASE(zorro_split_equity_moves_once_per_pnl_move) {
+    // PnL moves land entirely in tradeVal; the cash basis is unmoved.
+    const double cash = 21300.00;
+    double pnlBefore = 3700.00, pnlAfter = 3800.00;
+
+    ZorroAccountSplit a = splitEquityForZorro(cash + pnlBefore, pnlBefore);
+    ZorroAccountSplit b = splitEquityForZorro(cash + pnlAfter,  pnlAfter);
+
+    // Cash basis is unmoved by PnL; the whole move lands in tradeVal, once.
+    ASSERT_FLOAT_EQ_TOL(a.balance, b.balance, 1e-9);
+    ASSERT_FLOAT_EQ_TOL(b.tradeVal - a.tradeVal, 100.00, 1e-9);
+    ASSERT_FLOAT_EQ_TOL((b.balance + b.tradeVal) - (a.balance + a.tradeVal), 100.00, 1e-9);
+}
+
+TEST_CASE(zorro_split_flat_account_is_all_balance) {
+    ZorroAccountSplit s = splitEquityForZorro(25000.00, 0.0);
+    ASSERT_FLOAT_EQ_TOL(s.balance, 25000.00, 1e-9);
+    ASSERT_FLOAT_EQ(s.tradeVal, 0.0);
+}
+
+TEST_CASE(zorro_split_losing_book_raises_balance) {
+    // Open losses are already deducted from equity, so the cash basis is higher
+    // than equity and tradeVal is negative.
+    ZorroAccountSplit s = splitEquityForZorro(18000.00, -2500.00);
+    ASSERT_FLOAT_EQ_TOL(s.balance, 20500.00, 1e-9);
+    ASSERT_FLOAT_EQ_TOL(s.tradeVal, -2500.00, 1e-9);
+    ASSERT_FLOAT_EQ_TOL(s.balance + s.tradeVal, 18000.00, 1e-9);
+}
+
+TEST_CASE(zorro_split_profit_above_capital_gives_negative_balance) {
+    // Profit can exceed deposited capital. A negative cash basis is the honest
+    // figure and still reconstructs the right equity.
+    ZorroAccountSplit s = splitEquityForZorro(1000.00, 1500.00);
+    ASSERT_LT(s.balance, 0.0);
+    ASSERT_FLOAT_EQ_TOL(s.balance + s.tradeVal, 1000.00, 1e-9);
+}
+
+TEST_CASE(zorro_split_feeds_from_unified_equity) {
+    // End to end: the unified equity computeCollateral() derives is what gets
+    // split, so the two modules agree on the number Zorro finally sees.
+    SpotState st;
+    parseSpotClearinghouseState(SPOT_UNIFIED_MAINNET, strlen(SPOT_UNIFIED_MAINNET), st);
+    CollateralView v = computeCollateral(12500.00, 10000.00, st);
+
+    ZorroAccountSplit s = splitEquityForZorro(v.equity, 4000.00);
+    ASSERT_FLOAT_EQ_TOL(s.balance, 16000.000000, 1e-6);
+    ASSERT_FLOAT_EQ_TOL(s.balance + s.tradeVal, v.equity, 1e-9);
+}
+
+//=============================================================================
 // MAIN
 //=============================================================================
 
@@ -308,6 +378,15 @@ int main() {
     RUN_TEST(collateral_disabled_adds_perps_and_spot);
     RUN_TEST(collateral_no_spot_data_falls_back_to_perps);
     RUN_TEST(collateral_unified_with_zero_spot_reports_zero);
+
+    printf("\n-- Zorro account split --\n");
+    RUN_TEST(zorro_split_reconstructs_equity);
+    RUN_TEST(zorro_split_removes_open_pnl_from_balance);
+    RUN_TEST(zorro_split_equity_moves_once_per_pnl_move);
+    RUN_TEST(zorro_split_flat_account_is_all_balance);
+    RUN_TEST(zorro_split_losing_book_raises_balance);
+    RUN_TEST(zorro_split_profit_above_capital_gives_negative_balance);
+    RUN_TEST(zorro_split_feeds_from_unified_equity);
 
     return printTestSummary();
 }

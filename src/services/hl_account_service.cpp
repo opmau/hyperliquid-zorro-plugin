@@ -456,16 +456,28 @@ void applyFill(const char* coin, double fillSize, double fillPx, bool isBuy) {
 // ZORRO HELPERS
 // =============================================================================
 
+double getOpenTradeValue() {
+    double total = 0.0;
+    for (const auto& pos : getAllPositions()) {
+        total += pos.unrealizedPnl;
+    }
+    return total;
+}
+
 bool getZorroAccountValues(double* outBalance, double* outTradeVal, double* outMarginVal) {
     Balance bal = getBalance();
 
     if (bal.accountValue <= 0) return false;
 
-    // Zorro expects: Balance + TradeVal = Total Equity
-    // - pBalance = cash balance (withdrawable)
-    // - pTradeVal = unrealized PnL (equity - cash)
-    if (outBalance) *outBalance = bal.withdrawable;
-    if (outTradeVal) *outTradeVal = bal.unrealizedPnl();
+    // accountValue is marked to market, so the open PnL has to come back out
+    // before it can serve as Zorro's cash balance. `withdrawable` cannot stand
+    // in for that: on a unified account it tracks neither equity nor free
+    // collateral, so deriving PnL from it misreports most of the account as
+    // open-trade value. [OPM-876]
+    ZorroAccountSplit split = splitEquityForZorro(bal.accountValue, getOpenTradeValue());
+
+    if (outBalance) *outBalance = split.balance;
+    if (outTradeVal) *outTradeVal = split.tradeVal;
     if (outMarginVal) *outMarginVal = bal.marginUsed;
 
     return true;
