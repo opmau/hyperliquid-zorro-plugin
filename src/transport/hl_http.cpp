@@ -253,9 +253,15 @@ static HttpResultCode sendHttpRaw(const char* fullUrl, const char* body,
     return HTTP_OK;
 }
 
-// High-level HTTP send that returns a Response struct
+// High-level HTTP send that returns a Response struct.
+// retryNullBody: only /info queries are safe to re-send on a bare `null` body.
+// An /exchange action is a signed, nonced payload — re-sending it replays a
+// nonce the exchange may already have consumed, so a "nonce already used"
+// reject on the retry would mask an order that is actually resting. For those,
+// a null body fails immediately and the caller decides what to do.
 static Response sendHttpInternal(const char* fullUrl, const char* body,
-                                  const char* method, bool useSmallBuffer) {
+                                  const char* method, bool useSmallBuffer,
+                                  bool retryNullBody) {
     Response resp;
     resp.statusCode = 0;
 
@@ -284,7 +290,7 @@ static Response sendHttpInternal(const char* fullUrl, const char* body,
 
         if (result != HTTP_OK || !isBareNullBody(buffer)) break;
 
-        if (nullRetries >= NULL_RETRY_LIMIT) {
+        if (!retryNullBody || nullRetries >= NULL_RETRY_LIMIT) {
             result = HTTP_NULL_BODY;
             break;
         }
@@ -346,8 +352,9 @@ static Response sendHttpInternal(const char* fullUrl, const char* body,
 
         case HTTP_NULL_BODY:
             resp.error = "Null response body";
-            g_logger.logf(1, "HTTP null body persisted after %d retries, "
-                             "reporting failure: %s", NULL_RETRY_LIMIT, fullUrl);
+            g_logger.logf(1, "HTTP null body after %d retr%s, reporting "
+                             "failure: %s", nullRetries,
+                          (nullRetries == 1) ? "y" : "ies", fullUrl);
             return resp;
     }
 
@@ -373,17 +380,18 @@ static Response sendHttpInternal(const char* fullUrl, const char* body,
 // =============================================================================
 
 Response post(const char* url, const char* jsonBody, bool useSmallBuffer) {
-    return sendHttpInternal(url, jsonBody, "POST", useSmallBuffer);
+    return sendHttpInternal(url, jsonBody, "POST", useSmallBuffer, false);
 }
 
 Response get(const char* url, bool useSmallBuffer) {
-    return sendHttpInternal(url, nullptr, "GET", useSmallBuffer);
+    return sendHttpInternal(url, nullptr, "GET", useSmallBuffer, false);
 }
 
 Response infoPost(const char* jsonBody, bool useSmallBuffer) {
     char url[512];
     buildUrl("/info", url, sizeof(url));
-    return sendHttpInternal(url, jsonBody, "POST", useSmallBuffer);
+    // Read-only query: safe to re-send on a bare `null` body.
+    return sendHttpInternal(url, jsonBody, "POST", useSmallBuffer, true);
 }
 
 Response infoPostPerpDex(const char* jsonBody, const char* perpDex, bool useSmallBuffer) {
@@ -401,7 +409,9 @@ Response infoPostPerpDex(const char* jsonBody, const char* perpDex, bool useSmal
 Response exchangePost(const char* jsonBody) {
     char url[512];
     buildUrl("/exchange", url, sizeof(url));
-    return sendHttpInternal(url, jsonBody, "POST", false);  // Always use large buffer
+    // Large buffer always; never retry — the payload is signed and nonced, and
+    // a replay can mask an order that actually reached the book.
+    return sendHttpInternal(url, jsonBody, "POST", false, false);
 }
 
 } // namespace http

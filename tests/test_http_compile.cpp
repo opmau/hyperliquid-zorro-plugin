@@ -262,6 +262,35 @@ bool test_nullBodyPersistsIsFailure() {
     return true;
 }
 
+bool test_exchangeNullBodyNeverRetries() {
+    printf("[TEST] exchange null body fails immediately, no retry...\n");
+
+    strcpy_s(hl::g_config.baseUrl, "https://api.hyperliquid-testnet.xyz");
+    hl::g_config.diagLevel = 0;
+
+    auto* saved = http_result;
+    http_result = mock_http_result_scripted;
+    s_nullsRemaining = 1;      // a single retry WOULD succeed - it must not get one
+    s_resultCalls = 0;
+
+    auto resp = hl::http::exchangePost("{\"action\":{\"type\":\"order\"}}");
+
+    http_result = saved;
+
+    // A signed, nonced action must never be replayed: one attempt, then failure.
+    if (resp.success()) {
+        printf("  FAILED: null body reported as success, body '%s'\n", resp.body.c_str());
+        return false;
+    }
+    if (s_resultCalls != 1) {
+        printf("  FAILED: expected exactly 1 attempt (no replay), got %d\n", s_resultCalls);
+        return false;
+    }
+
+    printf("  PASSED (failed on attempt 1, no replay)\n");
+    return true;
+}
+
 // =============================================================================
 // MAIN
 // =============================================================================
@@ -284,6 +313,7 @@ int main() {
     if (test_infoPost()) passed++; else failed++;
     if (test_nullBodyRecovers()) passed++; else failed++;
     if (test_nullBodyPersistsIsFailure()) passed++; else failed++;
+    if (test_exchangeNullBodyNeverRetries()) passed++; else failed++;
 
     printf("\n============================================\n");
     printf("  Results: %d passed, %d failed\n", passed, failed);

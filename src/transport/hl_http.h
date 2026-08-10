@@ -19,11 +19,14 @@ namespace http {
 // RESPONSE STRUCT
 // =============================================================================
 
-/// A response body consisting of nothing but a JSON `null` is retried this many
-/// times before the request is reported as failed. The exchange intermittently
-/// answers a completed transfer this way for a query it serves correctly moments
-/// later; reporting failure keeps a caller from parsing it into zeros and
-/// mistaking an unanswered query for an empty account.
+/// An /info response body consisting of nothing but a JSON `null` is retried
+/// this many times before the request is reported as failed. The exchange
+/// intermittently answers a completed transfer this way for a query it serves
+/// correctly moments later; reporting failure keeps a caller from parsing it
+/// into zeros and mistaking an unanswered query for an empty account.
+/// Only /info queries retry. An /exchange action is signed and nonced, so a
+/// re-send is a nonce replay that can mask an order which actually reached the
+/// book; a `null` there fails immediately.
 constexpr int NULL_RETRY_LIMIT = 3;
 
 /// HTTP response with status and body
