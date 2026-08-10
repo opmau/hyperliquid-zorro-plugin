@@ -57,5 +57,15 @@ void resetAbstractionMode();
 /// @return Spot USDC `total` (0 if the query fails or there is no USDC entry)
 double refreshSpotBalance();
 
+/// Re-fetch the spot state when the cached snapshot is older than the TTL.
+///
+/// Spot state has no WS channel, and the stale-WS fallback in BrokerAccount
+/// does not run while account events keep the WS fresh — nothing else bounds
+/// this snapshot's age. A failed fetch does not count as a refresh; the next
+/// call retries. [OPM-878]
+///
+/// @return true if a fetch ran (caller should re-read the balance)
+bool ensureSpotFresh();
+
 } // namespace account
 } // namespace hl

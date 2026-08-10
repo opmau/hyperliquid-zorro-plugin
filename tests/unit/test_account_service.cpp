@@ -109,12 +109,18 @@ void applyFill(hl::ws::PriceCache& cache, const char* coin,
 
 /// Zorro account value decomposition
 /// Zorro expects: Balance + TradeVal = Total Equity
-bool getZorroAccountValues(const Balance& bal,
+///
+/// Mirrors splitEquityForZorro(): accountValue is marked to market, so the open
+/// PnL is taken back out to leave the cash balance Zorro asks for. `withdrawable`
+/// cannot serve as that balance — it reads 0.0 on unified accounts. The
+/// authoritative arithmetic is exercised in test_unified_collateral.cpp, which
+/// links the production header. [OPM-876]
+bool getZorroAccountValues(const Balance& bal, double openPnl,
                            double* outBalance, double* outTradeVal, double* outMarginVal) {
     if (bal.accountValue <= 0) return false;
 
-    if (outBalance) *outBalance = bal.withdrawable;
-    if (outTradeVal) *outTradeVal = bal.unrealizedPnl();
+    if (outBalance) *outBalance = bal.accountValue - openPnl;
+    if (outTradeVal) *outTradeVal = openPnl;
     if (outMarginVal) *outMarginVal = bal.marginUsed;
     return true;
 }
@@ -209,19 +215,49 @@ TEST_CASE(balance_stale_when_old) {
 
 TEST_CASE(zorro_account_values_normal) {
     AcctLogic::Balance bal;
-    bal.accountValue = 10500.0;
-    bal.withdrawable = 10000.0;
+    bal.accountValue = 10500.0;   // marked to market — carries the 500 already
     bal.marginUsed = 2000.0;
 
     double balance = 0, tradeVal = 0, marginVal = 0;
-    bool ok = AcctLogic::getZorroAccountValues(bal, &balance, &tradeVal, &marginVal);
+    bool ok = AcctLogic::getZorroAccountValues(bal, 500.0, &balance, &tradeVal, &marginVal);
 
     ASSERT_TRUE(ok);
-    ASSERT_FLOAT_EQ(balance, 10000.0);     // withdrawable
-    ASSERT_FLOAT_EQ(tradeVal, 500.0);      // unrealizedPnl
+    ASSERT_FLOAT_EQ(balance, 10000.0);     // cash basis, PnL removed
+    ASSERT_FLOAT_EQ(tradeVal, 500.0);      // open-trade value
     ASSERT_FLOAT_EQ(marginVal, 2000.0);    // marginUsed
     // Verify Zorro invariant: Balance + TradeVal = Total Equity
     ASSERT_FLOAT_EQ(balance + tradeVal, 10500.0);
+}
+
+TEST_CASE(zorro_account_values_unified_ignores_withdrawable) {
+    // On a unified account `withdrawable` tracks neither equity nor free
+    // collateral, so it must play no part in the split: the balance comes from
+    // equity less open PnL, whatever withdrawable reads.
+    AcctLogic::Balance bal;
+    bal.accountValue = 25000.00;
+    bal.withdrawable = 0.0;
+    bal.marginUsed = 12500.00;
+
+    double balance = 0, tradeVal = 0, marginVal = 0;
+    bool ok = AcctLogic::getZorroAccountValues(bal, 3700.00, &balance, &tradeVal, &marginVal);
+
+    ASSERT_TRUE(ok);
+    ASSERT_FLOAT_EQ_TOL(balance, 21300.00, 1e-9);
+    ASSERT_GT(balance, 0.0);
+    ASSERT_FLOAT_EQ_TOL(balance + tradeVal, 25000.00, 1e-9);
+}
+
+TEST_CASE(zorro_account_values_flat_book_is_all_balance) {
+    AcctLogic::Balance bal;
+    bal.accountValue = 10000.0;
+    bal.marginUsed = 0.0;
+
+    double balance = 0, tradeVal = 0, marginVal = 0;
+    bool ok = AcctLogic::getZorroAccountValues(bal, 0.0, &balance, &tradeVal, &marginVal);
+
+    ASSERT_TRUE(ok);
+    ASSERT_FLOAT_EQ(balance, 10000.0);
+    ASSERT_FLOAT_EQ(tradeVal, 0.0);
 }
 
 TEST_CASE(zorro_account_values_zero_equity_returns_false) {
@@ -229,17 +265,16 @@ TEST_CASE(zorro_account_values_zero_equity_returns_false) {
     bal.accountValue = 0.0;
 
     double balance = 0, tradeVal = 0, marginVal = 0;
-    bool ok = AcctLogic::getZorroAccountValues(bal, &balance, &tradeVal, &marginVal);
+    bool ok = AcctLogic::getZorroAccountValues(bal, 0.0, &balance, &tradeVal, &marginVal);
     ASSERT_FALSE(ok);
 }
 
 TEST_CASE(zorro_account_values_null_pointers_safe) {
     AcctLogic::Balance bal;
     bal.accountValue = 10000.0;
-    bal.withdrawable = 10000.0;
 
     // Should not crash with null pointers
-    bool ok = AcctLogic::getZorroAccountValues(bal, nullptr, nullptr, nullptr);
+    bool ok = AcctLogic::getZorroAccountValues(bal, 0.0, nullptr, nullptr, nullptr);
     ASSERT_TRUE(ok);
 }
 
@@ -375,6 +410,8 @@ int main() {
 
     // Zorro account values
     RUN_TEST(zorro_account_values_normal);
+    RUN_TEST(zorro_account_values_unified_ignores_withdrawable);
+    RUN_TEST(zorro_account_values_flat_book_is_all_balance);
     RUN_TEST(zorro_account_values_zero_equity_returns_false);
     RUN_TEST(zorro_account_values_null_pointers_safe);
 

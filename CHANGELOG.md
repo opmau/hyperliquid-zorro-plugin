@@ -11,13 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-08-10
+
 Corrects the account equity reported to Zorro on Hyperliquid's unified and
 portfolio-margin account abstraction modes.
 
 **Upgrading:** reported `Balance` and `Equity` increase on those accounts, so a
 strategy that sizes positions from either will trade larger. Review your sizing,
 and check the figure against the balance shown in the Hyperliquid interface,
-before deploying.
+before deploying. Note also that `Balance` is now a cash figure: while trades
+are open it differs from the marked-to-market equity by the open profit or
+loss, and it can read negative when open profit exceeds deposited capital.
+`Equity` is the value to compare against the exchange's portfolio display.
+
+A chase loop calling `50044` must pass `TradeID`, not the value returned by
+`enterLong()`/`enterShort()`. See Documentation below.
 
 ### Changed
 
@@ -39,7 +47,42 @@ before deploying.
   Staked HYPE is excluded. Hyperliquid's `portfolio` endpoint counts delegated
   stake at mark, which cannot margin a perp position.
 
+- **The login line always identifies the running build.** `Hyperliquid
+  <version> (build <timestamp> UTC)` is printed at every login, regardless of
+  diagnostics settings. The stamp is the link time of the image the process
+  actually loaded, so a session running an older DLL than the one on disk is
+  visible in its first log lines.
+
 ### Fixed
+
+- **Reported equity could go stale while the account was active.** The spot
+  balance — the entire equity on a unified or portfolio-margin account, and a
+  component of it otherwise — was refreshed only at login and during quiet
+  periods, so on an account with continuous activity it held its login-time
+  value all session while positions and PnL moved around it. An account poll
+  now re-fetches it once it is older than a minute; if that query fails, the
+  previous value is reported and the next poll retries. Adds at most one
+  balance query per minute to request traffic.
+
+- **Equity was overstated while trades were open, by the amount of their
+  unrealized profit.** Every equity figure Hyperliquid publishes is marked to
+  market, and `BrokerAccount` reported one as Zorro's *balance* with no
+  open-trade value, so the profit of open trades was counted a second time in
+  the equity Zorro derives — in live trading, displayed equity exceeded the
+  exchange's portfolio value by exactly the open profit. A strategy sizing from
+  `Equity` oversized in profit and undersized in drawdown.
+
+  `Balance` is now equity less open PnL, with the open PnL reported as the
+  trade value, so `Equity` matches the exchange's portfolio display. On an
+  account that also carries positions opened outside the strategy, the two can
+  still differ by the open profit of those positions.
+
+- **A WebSocket connection that had stopped delivering data was not closed and
+  reconnected until a later send on it failed,** which could be long after price
+  data had stopped arriving; until then price requests fell back to the slower
+  HTTP path. The connection is now closed and re-established when the exchange
+  stops answering keepalive pings, so the feed recovers on its own within about
+  half a minute.
 
 - **An account funded entirely on the spot side reported a balance of `0`,**
   which triggered the plugin's zero-balance guard — stopping the strategy and
@@ -52,6 +95,21 @@ before deploying.
 - **Integer-typed JSON values were read as `0.0`.** On a multi-collateral
   account this could match the wrong token and report another token's collateral
   as USDC's.
+
+### Documentation
+
+- **`50044` (reprice by trade ID) documented the wrong parameter.** If your
+  reprice call returns `-1`, this is why: pass `TradeID`, not the value returned
+  by `enterLong()`/`enterShort()`. That return is a `TRADE*` pointer rather than
+  an identifier, so it never resolves to a tracked trade. Assign it to
+  `ThisTrade` to read `TradeID`, checking it for nonzero first.
+
+- **The 2.1.0 notes claimed `batchModify` preserves queue priority. It does
+  not.** A repriced order is a new arrival at its new price level, and absent a
+  priority fee — which this plugin never sends — it joins the back of that
+  level. A maker strategy that budgeted reprices as free in queue terms should
+  revisit how often it requotes. The round-trip and no-fill-window advantages
+  over cancel-and-replace are unchanged.
 
 ## [2.1.0] — 2026-07-28
 
@@ -67,14 +125,16 @@ Read [Changed](#changed) before deploying to a live strategy.
   Lite-C:
 
   ```c
+  ThisTrade = enterLong();
   var params[3];
-  params[0] = tradeID; params[1] = newPrice; params[2] = 0;  // size <= 0 keeps current
+  params[0] = TradeID; params[1] = newPrice; params[2] = 0;  // size <= 0 keeps current
   int r = brokerCommand(50044, params);
   ```
 
-  Uses Hyperliquid's `batchModify`, which preserves queue priority, so a reprice
-  costs one round trip instead of the two a cancel-and-replace needs, and leaves
-  no window for the order to fill in between. Returns `1` on success, `0` if the
+  Uses Hyperliquid's `batchModify`, so a reprice costs one round trip instead of
+  the two a cancel-and-replace needs, and leaves no window for the order to fill
+  in between. It does not preserve queue position — the repriced order is a new
+  arrival at its new price level. Returns `1` on success, `0` if the
   exchange rejected the modify, `-1` for an unknown trade ID, and `-2` if the
   order had already filled or been cancelled — so a reprice loop can tell a lost
   race from a genuine failure. The pre-existing `50042` takes a struct
@@ -205,13 +265,11 @@ froze the daily rebalance. Validated by ~1 week of live trading before release.
   rebalance until a manual `.trd` resync:
   - Mapped trades now record Zorro-driven closes in a new `closedSize` field
     and BrokerTrade reports `filledSize - closedSize` (net open), instead of
-    re-reporting the entry order's gross fill (e.g. 61796 after a reduce to
-    58508).
+    re-reporting the entry order's gross fill, which undid a partial reduce.
   - The OPM-680 pre-extend share snapshot now runs only on the sole→multi
     tracker transition, via a shared `hasOtherSameSideTracker()` predicate
     that also backs BrokerTrade's reporting — so a second consecutive extend
-    no longer double-counts a sibling's fill into an imported trade's share
-    (81910 → 87741).
+    no longer double-counts a sibling's fill into an imported trade's share.
   - A sub-lot epsilon on the net-open size prevents a full close that leaves
     a tiny float residual from reporting a phantom 1-lot trade.
 
@@ -264,12 +322,11 @@ CI/CD (the release DLL is now built and published automatically on tag).
 - **Reconcile double-count blocked further trading after EXTEND orders** ([OPM-680]):
   `BrokerTrade`'s `IMPORTED_` branch returned the broker's live aggregate position
   size, which double-counted when a same-side `BrokerBuy2` created a new tradeID
-  alongside an existing `IMPORTED_` position. Zorro then saw e.g. `-0.30075` BTC while
-  Hyperliquid held `-0.21060`, the reconcile delta exceeded the strategy's $500 HALT
-  threshold, and every subsequent daily rebalance was skipped. Fixed with per-tradeID
-  share accounting so each tradeID reports only its own portion. Observed in live
-  trading on a daily rebalance, where two assets each drifted by exactly one prior
-  order's size.
+  alongside an existing `IMPORTED_` position. Zorro's position size then diverged
+  from Hyperliquid's by the size of the earlier order, and once that delta exceeded
+  the strategy's reconciliation tolerance every subsequent rebalance was skipped.
+  Fixed with per-tradeID share accounting so each tradeID reports only its own
+  portion.
 
 ### Added
 
@@ -413,7 +470,8 @@ First production release of the refactored plugin.
 
 ---
 
-[Unreleased]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.0.7...v2.1.0
 [2.0.7]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.0.6...v2.0.7
 [2.0.6]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.0.5...v2.0.6

@@ -68,16 +68,16 @@
 // Keep in step with project(... VERSION ...) in CMakeLists.txt and CHANGELOG.md.
 #ifdef DEV_BUILD
   #define PLUGIN_NAME "Hyperliquid-DEV"
-  #define PLUGIN_VERSION "2.1.0-DEV"
+  #define PLUGIN_VERSION "2.2.0-DEV"
 #else
   #define PLUGIN_NAME "Hyperliquid"
-  #define PLUGIN_VERSION "2.1.0"
+  #define PLUGIN_VERSION "2.2.0"
 #endif
 
-// Compile-time build stamp — changes on every recompile, so the BrokerLogin
-// log line unambiguously identifies which DLL build is loaded. Use this to
-// detect a stale/wrong DLL at runtime (a hardcoded version string can't).
-#define PLUGIN_BUILD (__DATE__ " " __TIME__)
+// Format the running DLL's link time (defined in hl_broker.cpp). Identifies
+// the loaded build where a version string cannot — see the definition for why
+// a __DATE__ macro is not a substitute.
+void formatBuildStamp(char* buf, size_t bufSize);
 
 #define DLLFUNC extern "C" __declspec(dllexport)
 

@@ -325,6 +325,7 @@ In addition to the standalone `.bat` tests, CMakeLists.txt defines these test ex
 | `test_ws_auto_reconnect` | Auto-reconnect after disconnect | Yes (testnet) |
 | `test_ixwebsocket_connect` | Raw IXWebSocket API connectivity | Yes (testnet) |
 | `test_ws_l2book_integration` | L2 book multi-asset subscription | Yes (testnet) |
+| `test_ws_keepalive` | Protocol ping is answered and sustains a quiet connection | Yes (testnet, runs ~65s) |
 
 Build and run CMake tests:
 ```batch

@@ -140,15 +140,54 @@ enum HttpResultCode {
     HTTP_REQUEST_FAILED = 1,
     HTTP_TIMEOUT = 2,
     HTTP_ABORTED = 3,
-    HTTP_EMPTY_RESPONSE = 4
+    HTTP_EMPTY_RESPONSE = 4,
+    HTTP_NULL_BODY = 5
 };
+
+// A completed transfer sometimes carries nothing but a JSON `null` for a
+// request the exchange answers correctly moments later, in bursts that recover
+// on their own. Retry a bounded number of times (NULL_RETRY_LIMIT, declared in
+// the header alongside the contract it documents), then report failure.
+static const int NULL_RETRY_DELAY_MS = 250;
+
+// Granularity of every wait below. nap() yields to Zorro so its message pump
+// keeps running while a request is outstanding.
+static const int NAP_INTERVAL_MS = 10;
+
+// True when the body holds a bare JSON null and nothing else.
+static bool isBareNullBody(const char* body) {
+    if (!body) return false;
+    while (*body == ' ' || *body == '\t' || *body == '\r' || *body == '\n') ++body;
+    if (strncmp(body, "null", 4) != 0) return false;
+    body += 4;
+    while (*body == ' ' || *body == '\t' || *body == '\r' || *body == '\n') ++body;
+    return *body == '\0';
+}
+
+// Non-blocking pause that lets Zorro process messages, guarded the same way as
+// the wait loop below. Returns false when Zorro asks us to abort.
+static bool napGuarded(int totalMs) {
+    int remaining = totalMs;
+    while (remaining > 0) {
+        int napResult = 0;
+        __try {
+            napResult = nap(NAP_INTERVAL_MS);
+        } __except(EXCEPTION_EXECUTE_HANDLER) {
+            napResult = 0;
+        }
+        if (!napResult) return false;
+        remaining -= NAP_INTERVAL_MS;
+    }
+    return true;
+}
 
 // Low-level HTTP send with SEH exception handling
 // This function is separate because __try/__except cannot be used in functions
 // that have C++ objects requiring destructors (like std::string)
 static HttpResultCode sendHttpRaw(const char* fullUrl, const char* body,
                                    const char* method, char* buffer,
-                                   size_t bufferSize, size_t* outResultSize) {
+                                   size_t bufferSize, size_t* outResultSize,
+                                   int timeoutMs) {
     *outResultSize = 0;
 
     // Send request with exception handling (Zorro functions can throw SEH exceptions)
@@ -163,8 +202,11 @@ static HttpResultCode sendHttpRaw(const char* fullUrl, const char* body,
         return HTTP_REQUEST_FAILED;
     }
 
-    // Wait for response (~30 second timeout with 10ms intervals)
-    int waitCount = 3000;
+    // Wait for the response, polling every NAP_INTERVAL_MS. nap() lets Zorro
+    // pump its messages, but the caller makes no progress until this returns,
+    // so timeoutMs bounds how long one unanswered request can hold it up.
+    int waitCount = timeoutMs / NAP_INTERVAL_MS;
+    if (waitCount < 1) waitCount = 1;
     int size = 0;
     while (waitCount > 0) {
         __try {
@@ -178,7 +220,7 @@ static HttpResultCode sendHttpRaw(const char* fullUrl, const char* body,
         // Non-blocking sleep (allows Zorro message processing)
         int napResult = 0;
         __try {
-            napResult = nap(10);
+            napResult = nap(NAP_INTERVAL_MS);
         } __except(EXCEPTION_EXECUTE_HANDLER) {
             napResult = 0;
         }
@@ -219,9 +261,15 @@ static HttpResultCode sendHttpRaw(const char* fullUrl, const char* body,
     return HTTP_OK;
 }
 
-// High-level HTTP send that returns a Response struct
+// High-level HTTP send that returns a Response struct.
+// retryNullBody: only /info queries are safe to re-send on a bare `null` body.
+// An /exchange action is a signed, nonced payload — re-sending it replays a
+// nonce the exchange may already have consumed, so a "nonce already used"
+// reject on the retry would mask an order that is actually resting. For those,
+// a null body fails immediately and the caller decides what to do.
 static Response sendHttpInternal(const char* fullUrl, const char* body,
-                                  const char* method, bool useSmallBuffer) {
+                                  const char* method, bool useSmallBuffer,
+                                  bool retryNullBody, int timeoutMs) {
     Response resp;
     resp.statusCode = 0;
 
@@ -239,9 +287,37 @@ static Response sendHttpInternal(const char* fullUrl, const char* body,
     // gaps even if the WS thread were healthy.
     DWORD startMs = GetTickCount();
 
-    // Call the low-level function (which has SEH handling)
+    // Call the low-level function (which has SEH handling), retrying a bare
+    // `null` body rather than handing it to the caller as valid data.
     size_t resultSize = 0;
-    HttpResultCode result = sendHttpRaw(fullUrl, body, method, buffer, bufferSize, &resultSize);
+    HttpResultCode result = HTTP_OK;
+    int nullRetries = 0;
+
+    for (;;) {
+        result = sendHttpRaw(fullUrl, body, method, buffer, bufferSize, &resultSize,
+                             timeoutMs);
+
+        if (result != HTTP_OK || !isBareNullBody(buffer)) break;
+
+        if (!retryNullBody || nullRetries >= NULL_RETRY_LIMIT) {
+            result = HTTP_NULL_BODY;
+            break;
+        }
+
+        ++nullRetries;
+        g_logger.logf(1, "HTTP null body, retrying (%d/%d): %s",
+                      nullRetries, NULL_RETRY_LIMIT, fullUrl);
+
+        if (!napGuarded(NULL_RETRY_DELAY_MS)) {
+            result = HTTP_ABORTED;
+            break;
+        }
+    }
+
+    if (result == HTTP_OK && nullRetries > 0) {
+        g_logger.logf(1, "HTTP null body recovered after %d retr%s: %s",
+                      nullRetries, (nullRetries == 1) ? "y" : "ies", fullUrl);
+    }
 
     DWORD durationMs = GetTickCount() - startMs;
     if (durationMs >= 5000) {
@@ -282,6 +358,13 @@ static Response sendHttpInternal(const char* fullUrl, const char* body,
                 g_logger.logf(1, "HTTP empty response: %s", fullUrl);
             }
             return resp;
+
+        case HTTP_NULL_BODY:
+            resp.error = "Null response body";
+            g_logger.logf(1, "HTTP null body after %d retr%s, reporting "
+                             "failure: %s", nullRetries,
+                          (nullRetries == 1) ? "y" : "ies", fullUrl);
+            return resp;
     }
 
     // Log response at diag level 2
@@ -306,17 +389,21 @@ static Response sendHttpInternal(const char* fullUrl, const char* body,
 // =============================================================================
 
 Response post(const char* url, const char* jsonBody, bool useSmallBuffer) {
-    return sendHttpInternal(url, jsonBody, "POST", useSmallBuffer);
+    return sendHttpInternal(url, jsonBody, "POST", useSmallBuffer, false,
+                            config::HTTP_TIMEOUT_MS);
 }
 
 Response get(const char* url, bool useSmallBuffer) {
-    return sendHttpInternal(url, nullptr, "GET", useSmallBuffer);
+    return sendHttpInternal(url, nullptr, "GET", useSmallBuffer, false,
+                            config::HTTP_TIMEOUT_MS);
 }
 
 Response infoPost(const char* jsonBody, bool useSmallBuffer) {
     char url[512];
     buildUrl("/info", url, sizeof(url));
-    return sendHttpInternal(url, jsonBody, "POST", useSmallBuffer);
+    // Read-only query: safe to re-send on a bare `null` body.
+    return sendHttpInternal(url, jsonBody, "POST", useSmallBuffer, true,
+                            config::HTTP_TIMEOUT_MS);
 }
 
 Response infoPostPerpDex(const char* jsonBody, const char* perpDex, bool useSmallBuffer) {
@@ -334,7 +421,11 @@ Response infoPostPerpDex(const char* jsonBody, const char* perpDex, bool useSmal
 Response exchangePost(const char* jsonBody) {
     char url[512];
     buildUrl("/exchange", url, sizeof(url));
-    return sendHttpInternal(url, jsonBody, "POST", false);  // Always use large buffer
+    // Large buffer always; never retry — the payload is signed and nonced, and
+    // a replay can mask an order that actually reached the book. Given longer
+    // than a query for the same reason: giving up does not cancel the action.
+    return sendHttpInternal(url, jsonBody, "POST", false, false,
+                            config::HTTP_EXCHANGE_TIMEOUT_MS);
 }
 
 } // namespace http

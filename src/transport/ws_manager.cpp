@@ -269,9 +269,9 @@ void WebSocketManager::connectionLoop() {
                 HL550_PHASE("sendAcctSubs");
             }
 
-            // HL application ping at reduced frequency [OPM-128]
-            // Protocol-level pings (IXWebSocket) keep the connection alive.
-            // HL app pings keep the subscription channels active.
+            // HL application ping [OPM-128, OPM-868]. This is what holds the
+            // session open: the exchange closes a connection with no app
+            // traffic as inactive, and protocol pongs do not reset that timer.
             DWORD now = GetTickCount();
             if (now - lastHlPingTick >= HL_PING_INTERVAL_MS) {
                 connection_.send("{\"method\":\"ping\"}");

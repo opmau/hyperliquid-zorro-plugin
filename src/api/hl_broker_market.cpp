@@ -205,6 +205,15 @@ DLLFUNC int BrokerAccount(char* accountId, double* pBalance,
         }
     }
 
+    // Bound the age of the spot snapshot: nothing else refreshes it except
+    // login and the stale-WS fallback. No-op inside the TTL. [OPM-878]
+    // Keep the balance already in hand if the WS cache aged past its own
+    // staleness window between the two reads.
+    if (hl::account::ensureSpotFresh()) {
+        hl::account::Balance fresh = hl::account::getBalance();
+        if (fresh.dataReceived) balance = fresh;
+    }
+
     // accountValue=0 is valid (testnet accounts often report 0 balance).
     // One-time HTTP check to confirm, then accept the result.
     if (balance.accountValue <= 0 && !g_lastHttpFallbackTime) {
@@ -234,16 +243,24 @@ DLLFUNC int BrokerAccount(char* accountId, double* pBalance,
         }
     }
 
-    // Zorro expects: Balance + TradeVal = Equity
-    // For crypto perps: accountValue IS the total equity (includes unrealized PnL).
-    if (pBalance) *pBalance = balance.accountValue;
-    if (pTradeVal) *pTradeVal = 0;
+    // Zorro expects: Balance + TradeVal = Equity, and derives equity from the
+    // balance plus the profit of the trades it tracks. accountValue is marked
+    // to market and already carries that profit, so it cannot serve as the
+    // balance. Report the cash basis and let TradeVal carry the PnL — see
+    // splitEquityForZorro(). [OPM-876]
+    hl::account::ZorroAccountSplit split = hl::account::splitEquityForZorro(
+        balance.accountValue, hl::account::getOpenTradeValue());
+
+    if (pBalance) *pBalance = split.balance;
+    if (pTradeVal) *pTradeVal = split.tradeVal;
     if (pMarginVal) *pMarginVal = balance.marginUsed;
 
     if (hl::g_config.diagLevel >= 2) {
         char msg[256];
-        sprintf_s(msg, "BrokerAccount: balance=%.2f margin=%.2f free=%.2f collateral=%s",
-                  balance.accountValue, balance.marginUsed, balance.freeCollateral,
+        sprintf_s(msg, "BrokerAccount: equity=%.2f balance=%.2f tradeVal=%.2f "
+                       "margin=%.2f free=%.2f collateral=%s",
+                  balance.accountValue, split.balance, split.tradeVal,
+                  balance.marginUsed, balance.freeCollateral,
                   balance.unifiedCollateral ? "unified(spot)" : "separate(perps+spot)");
         hl::g_logger.log(2, msg);
     }
