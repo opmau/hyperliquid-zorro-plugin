@@ -128,7 +128,7 @@ if (!id) {
 
 | Code | Name | Parameter | Returns |
 |------|------|-----------|---------|
-| 50032 | `HL_SCHEDULE_CANCEL` | seconds from now, `0` to clear | `1` on success |
+| 50032 | `HL_SCHEDULE_CANCEL` | seconds from now, `0` to clear | `1` armed, `0` not armed — see below |
 | 50040 | `HL_PLACE_TWAP` | `TwapRequest*` | TWAP ID |
 | 50041 | `HL_CANCEL_TWAP` | TWAP ID | `1` on success |
 | 50042 | `HL_MODIFY_ORDER` | `ModifyRequest*` | `1` on success |
@@ -138,6 +138,20 @@ if (!id) {
 **`50040`, `50042` and `50043` are not callable from Lite-C.** Their request
 structs contain `std::string` members, so they are reachable only from C++.
 `50044` is the Lite-C-callable equivalent of `50042`.
+
+#### `50032` — the dead-man's switch can be refused; check the return
+
+Hyperliquid does not offer `scheduleCancel` to every account: below a lifetime
+traded-volume threshold the exchange refuses it, with a message of the form —
+
+> Cannot set scheduled cancel time until enough volume traded.
+> Required: $1000000.
+
+On any refusal (or HTTP failure) the command returns `0`. A strategy that arms
+the switch without checking the return believes its resting orders are covered
+when they are not. Treat `0` as **unprotected** and decide whether to leave
+orders resting at all; with `SET_DIAGNOSTICS` (138) at level 1 or above, the
+refusal is also logged with the exchange's message.
 
 #### Modify replaces with a maker order, never an IOC
 
@@ -244,7 +258,10 @@ Note that `14`/`15` switch Zorro's close path from `BrokerSell2` to
 ## Working a maker (ALO) order end to end
 
 ```c
-brokerCommand(50032, 60);            // dead-man's switch: cancel all in 60s
+// Dead-man's switch: cancel all in 60s. 0 = refused (volume-gated, see 50032
+// above) — you are NOT protected; quote only what you can babysit.
+if (!brokerCommand(50032, 60)) return;
+
 brokerCommand(50012, "Alo");         // sticky — survives Zorro's auto-call
 
 // Derive a price that cannot cross. An ALO order that would match is
