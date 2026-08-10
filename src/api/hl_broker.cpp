@@ -200,6 +200,31 @@ std::string buildCoinForApi(const char* perpDex, const char* coin) {
     return std::string(coin);
 }
 
+// The linker rewrites the PE header timestamp at every link, and this reads it
+// from the image mapped into the process — so the stamp always matches the
+// code that is running, even when the file on disk was replaced after launch.
+// A __DATE__ macro can promise neither: it refreshes only when its own
+// translation unit recompiles, and it describes a file, not the loaded image.
+void formatBuildStamp(char* buf, size_t bufSize) {
+    HMODULE hMod = nullptr;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            reinterpret_cast<LPCSTR>(&formatBuildStamp), &hMod)
+        || !hMod) {
+        strncpy_s(buf, bufSize, "unknown", _TRUNCATE);
+        return;
+    }
+    auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(hMod);
+    auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+        reinterpret_cast<const BYTE*>(hMod) + dos->e_lfanew);
+    time_t linkTime = static_cast<time_t>(nt->FileHeader.TimeDateStamp);
+    struct tm utc;
+    if (gmtime_s(&utc, &linkTime) != 0 ||
+        strftime(buf, bufSize, "%Y-%m-%d %H:%M:%S UTC", &utc) == 0) {
+        strncpy_s(buf, bufSize, "unknown", _TRUNCATE);
+    }
+}
+
 //=============================================================================
 // BrokerOpen - Plugin initialization
 //=============================================================================
@@ -412,9 +437,14 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
 
         if (accounts) accounts[0] = '\0';
 
+        // Printed regardless of diagnostics: SET_DIAGNOSTICS arrives from the
+        // script only after login, so a level-gated line is absent from
+        // exactly the sessions that need identifying. [OPM-887]
+        char stamp[40];
+        formatBuildStamp(stamp, sizeof(stamp));
         char verMsg[128];
-        sprintf_s(verMsg, "%s %s (build %s)", PLUGIN_NAME, PLUGIN_VERSION, PLUGIN_BUILD);
-        hl::g_logger.log(1, verMsg);
+        sprintf_s(verMsg, "%s %s (build %s)", PLUGIN_NAME, PLUGIN_VERSION, stamp);
+        if (hl::g_logger.callback) hl::g_logger.callback(verMsg);
 
         return 1;
 

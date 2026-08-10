@@ -45,6 +45,12 @@ A chase loop calling `50044` must pass `TradeID`, not the value returned by
   Staked HYPE is excluded. Hyperliquid's `portfolio` endpoint counts delegated
   stake at mark, which cannot margin a perp position.
 
+- **The login line always identifies the running build.** `Hyperliquid
+  <version> (build <timestamp> UTC)` is printed at every login, regardless of
+  diagnostics settings. The stamp is the link time of the image the process
+  actually loaded, so a session running an older DLL than the one on disk is
+  visible in its first log lines.
+
 ### Fixed
 
 - **Reported equity could go stale while the account was active.** The spot
