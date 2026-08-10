@@ -19,6 +19,9 @@ strategy that sizes positions from either will trade larger. Review your sizing,
 and check the figure against the balance shown in the Hyperliquid interface,
 before deploying.
 
+A chase loop calling `50044` must pass `TradeID`, not the value returned by
+`enterLong()`/`enterShort()`. See Documentation below.
+
 ### Changed
 
 - **`BrokerAccount` reports equity according to the account's collateral model.**
@@ -53,6 +56,14 @@ before deploying.
   account this could match the wrong token and report another token's collateral
   as USDC's.
 
+### Documentation
+
+- **`50044` (reprice by trade ID) documented the wrong parameter.** If your
+  reprice call returns `-1`, this is why: pass `TradeID`, not the value returned
+  by `enterLong()`/`enterShort()`. That return is a `TRADE*` pointer rather than
+  an identifier, so it never resolves to a tracked trade. Assign it to
+  `ThisTrade` to read `TradeID`, checking it for nonzero first.
+
 ## [2.1.0] — 2026-07-28
 
 Adds working post-only (ALO) maker execution, reports exchange order rejects to
@@ -67,8 +78,9 @@ Read [Changed](#changed) before deploying to a live strategy.
   Lite-C:
 
   ```c
+  ThisTrade = enterLong();
   var params[3];
-  params[0] = tradeID; params[1] = newPrice; params[2] = 0;  // size <= 0 keeps current
+  params[0] = TradeID; params[1] = newPrice; params[2] = 0;  // size <= 0 keeps current
   int r = brokerCommand(50044, params);
   ```
 

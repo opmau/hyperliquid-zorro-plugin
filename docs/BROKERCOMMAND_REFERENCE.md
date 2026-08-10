@@ -156,13 +156,31 @@ a question about the current book, which only the exchange can answer.
 #### `50044` — reprice a resting order
 
 ```c
+ThisTrade = enterLong();  // enterLong()/enterShort() return a TRADE*, not an ID
+
 var params[3];
-params[0] = tradeID;      // as returned by enterLong()/enterShort()
+params[0] = TradeID;      // the ID the broker assigned to this trade
 params[1] = newPrice;     // must be > 0
 params[2] = 0;            // new size in contracts, or <= 0 to keep current
 
 int r = brokerCommand(50044, params);
 ```
+
+`params[0]` is `TradeID`, the broker's own identifier for the trade. Assigning
+the returned `TRADE*` to `ThisTrade` makes `TradeID` and the other trade
+variables readable; passing the pointer itself yields `-1`. Check the pointer
+for nonzero first — reading a trade variable through a null `ThisTrade`
+crashes.
+
+`TradeID` is readable as soon as the order is acknowledged, with `TradeLots`
+still `0` until it fills, so a chase loop can reprice without waiting for a
+fill. Inside a `for(open_trades)` loop `TradeID` refers to the trade being
+iterated, which is the other way to reach it.
+
+Pass a positive `TradeID`. Zorro sets it to `-1` for a trade identified by a
+`TradeUUID` string rather than a number, and `50044` returns `-1` for an
+untracked trade — so passing one straight through is indistinguishable from a
+failed lookup.
 
 | Return | Meaning |
 |--------|---------|
@@ -237,13 +255,15 @@ var ask = brokerCommand(GET_PRICE, 5);
 if (bid <= 0 || ask <= 0) return;    // hard 0.0 means no data — never guess
 
 OrderLimit = bid;                    // buy: join the bid. Sell: use ask.
-int id = enterLong();
+ThisTrade = enterLong();
 
-if (!id) {
+if (!ThisTrade) {                    // never read a trade variable through null
     char errText[256];
-    if (brokerCommand(50023, errText) == 1)
-        return;                       // would have crossed; requote next bar
+    brokerCommand(50023, errText);   // 1 = would have crossed; requote next bar
+    return;
 }
+
+int id = TradeID;                    // broker's ID for the order — 50044 takes this
 
 // Poll for the fill — the plugin does not block.
 while (waited < timeout) {
