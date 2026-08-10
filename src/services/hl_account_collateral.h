@@ -230,5 +230,20 @@ inline ZorroAccountSplit splitEquityForZorro(double equity, double openPnl) {
     return split;
 }
 
+// =============================================================================
+// SPOT REFRESH SCHEDULE
+// =============================================================================
+
+/// True when the cached spot snapshot is old enough that a re-fetch is due.
+/// Spot state arrives over HTTP only — no WS channel carries it — so its age
+/// is bounded by the caller. Tick arithmetic is unsigned on purpose:
+/// GetTickCount() wraps to 0 after ~49.7 days, and `now - last` stays correct
+/// across the wrap where a signed comparison would not.
+inline bool spotRefreshDue(unsigned long nowTick, unsigned long lastFetchTick,
+                           bool everFetched, unsigned long ttlMs) {
+    if (!everFetched) return true;
+    return (unsigned long)(nowTick - lastFetchTick) >= ttlMs;
+}
+
 } // namespace account
 } // namespace hl

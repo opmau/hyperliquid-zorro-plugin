@@ -205,6 +205,15 @@ DLLFUNC int BrokerAccount(char* accountId, double* pBalance,
         }
     }
 
+    // Bound the age of the spot snapshot: nothing else refreshes it except
+    // login and the stale-WS fallback. No-op inside the TTL. [OPM-878]
+    // Keep the balance already in hand if the WS cache aged past its own
+    // staleness window between the two reads.
+    if (hl::account::ensureSpotFresh()) {
+        hl::account::Balance fresh = hl::account::getBalance();
+        if (fresh.dataReceived) balance = fresh;
+    }
+
     // accountValue=0 is valid (testnet accounts often report 0 balance).
     // One-time HTTP check to confirm, then accept the result.
     if (balance.accountValue <= 0 && !g_lastHttpFallbackTime) {

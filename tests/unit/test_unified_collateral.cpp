@@ -346,6 +346,37 @@ TEST_CASE(zorro_split_feeds_from_unified_equity) {
 }
 
 //=============================================================================
+// TEST CASES: Spot refresh schedule [OPM-878]
+//
+// Spot state has no WS channel, so its age is bounded by this predicate. The
+// wraparound cases matter: GetTickCount() wraps to 0 after ~49.7 days, and a
+// signed comparison would wrongly report "due" or "fresh" across the wrap.
+//=============================================================================
+
+TEST_CASE(spot_refresh_due_when_never_fetched) {
+    ASSERT_TRUE(spotRefreshDue(1000, 0, false, 60000));
+}
+
+TEST_CASE(spot_refresh_not_due_within_ttl) {
+    ASSERT_FALSE(spotRefreshDue(59999, 0, true, 60000));
+}
+
+TEST_CASE(spot_refresh_due_at_ttl_boundary) {
+    ASSERT_TRUE(spotRefreshDue(60000, 0, true, 60000));
+}
+
+TEST_CASE(spot_refresh_survives_tick_wraparound) {
+    // Fetched just before the wrap, checked just after: elapsed is small, so
+    // no refresh is due even though nowTick < lastFetchTick numerically.
+    unsigned long last = 0xFFFFFF00ul;   // 256 ticks before the wrap
+    unsigned long now = 0x00000100ul;    // 256 ticks after it (elapsed 512ms)
+    ASSERT_FALSE(spotRefreshDue(now, last, true, 60000));
+
+    // And a full TTL after the wrap, the refresh IS due.
+    ASSERT_TRUE(spotRefreshDue(last + 60000ul, last, true, 60000));
+}
+
+//=============================================================================
 // MAIN
 //=============================================================================
 
@@ -387,6 +418,12 @@ int main() {
     RUN_TEST(zorro_split_losing_book_raises_balance);
     RUN_TEST(zorro_split_profit_above_capital_gives_negative_balance);
     RUN_TEST(zorro_split_feeds_from_unified_equity);
+
+    printf("\n-- spot refresh schedule --\n");
+    RUN_TEST(spot_refresh_due_when_never_fetched);
+    RUN_TEST(spot_refresh_not_due_within_ttl);
+    RUN_TEST(spot_refresh_due_at_ttl_boundary);
+    RUN_TEST(spot_refresh_survives_tick_wraparound);
 
     return printTestSummary();
 }
