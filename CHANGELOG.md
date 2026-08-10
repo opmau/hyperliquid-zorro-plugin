@@ -44,6 +44,13 @@ A chase loop calling `50044` must pass `TradeID`, not the value returned by
 
 ### Fixed
 
+- **A WebSocket connection that had stopped delivering data was not closed and
+  reconnected until a later send on it failed,** which could be long after price
+  data had stopped arriving; until then price requests fell back to the slower
+  HTTP path. The connection is now closed and re-established when the exchange
+  stops answering keepalive pings, so the feed recovers on its own within about
+  half a minute.
+
 - **An account funded entirely on the spot side reported a balance of `0`,**
   which triggered the plugin's zero-balance guard — stopping the strategy and
   reporting a suspected wallet-address misconfiguration.
