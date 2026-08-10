@@ -14,6 +14,7 @@
 //=============================================================================
 
 #include "ws_connection.h"
+#include "../foundation/hl_config.h"
 #include <IXNetSystem.h>
 #include <IXSocketTLSOptions.h>
 #include <cstdio>
@@ -227,6 +228,28 @@ bool Connection::connect(const char* hostname, bool secure,
     ws_.setUrl(url);
     // Auto-reconnect is configured by enableAutoReconnect() before connect [OPM-128]
     ws_.disablePerMessageDeflate();
+
+    // Protocol-level ping/pong keepalive [OPM-868].
+    //
+    // IXWebSocket disables its ping entirely unless an interval is set, and
+    // with it disabled the pong tracking that detects an unresponsive peer
+    // never runs. An application-level ping cannot substitute: on a half-open
+    // connection the send lands in the local socket buffer and reports
+    // success, so the feed looks alive indefinitely while no data arrives.
+    // The socket is then only discovered dead when some later send happens to
+    // fail, which can be hours after the last message.
+    //
+    // With an interval set, a ping goes out whenever the connection has been
+    // idle that long, and the transport closes the socket if the pong does not
+    // come back before the next one is due — so auto-reconnect restores the
+    // feed within roughly one interval instead of on the next failed send.
+    //
+    // This does not replace the application ping the manager sends. The
+    // exchange closes a session carrying no application traffic as inactive
+    // after about a minute and protocol pongs do not reset that timer, so the
+    // two run together: the application ping holds the session open, the
+    // protocol ping detects a peer that has stopped answering.
+    ws_.setPingInterval(config::WS_PING_INTERVAL_MS / 1000);
 
     // Explicit TLS: use system CA store, verify hostname [OPM-156]
     if (secure) {

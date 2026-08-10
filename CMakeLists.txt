@@ -201,6 +201,17 @@ target_include_directories(test_ws_connection_ix PRIVATE
 )
 target_link_libraries(test_ws_connection_ix PRIVATE hl_transport)
 
+# Protocol keepalive test [OPM-868]
+add_executable(test_ws_keepalive
+    tests/test_ws_keepalive.cpp
+)
+target_include_directories(test_ws_keepalive PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/transport
+    ${CMAKE_SOURCE_DIR}/src/foundation
+    ${CMAKE_SOURCE_DIR}/tests
+)
+target_link_libraries(test_ws_keepalive PRIVATE hl_transport)
+
 # Auto-reconnect test (simplified ws_manager) [OPM-128]
 add_executable(test_ws_auto_reconnect
     tests/test_ws_auto_reconnect.cpp
