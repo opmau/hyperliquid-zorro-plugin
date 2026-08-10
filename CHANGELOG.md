@@ -64,6 +64,13 @@ A chase loop calling `50044` must pass `TradeID`, not the value returned by
   an identifier, so it never resolves to a tracked trade. Assign it to
   `ThisTrade` to read `TradeID`, checking it for nonzero first.
 
+- **The 2.1.0 notes claimed `batchModify` preserves queue priority. It does
+  not.** A repriced order is a new arrival at its new price level, and absent a
+  priority fee — which this plugin never sends — it joins the back of that
+  level. A maker strategy that budgeted reprices as free in queue terms should
+  revisit how often it requotes. The round-trip and no-fill-window advantages
+  over cancel-and-replace are unchanged.
+
 ## [2.1.0] — 2026-07-28
 
 Adds working post-only (ALO) maker execution, reports exchange order rejects to
@@ -84,9 +91,10 @@ Read [Changed](#changed) before deploying to a live strategy.
   int r = brokerCommand(50044, params);
   ```
 
-  Uses Hyperliquid's `batchModify`, which preserves queue priority, so a reprice
-  costs one round trip instead of the two a cancel-and-replace needs, and leaves
-  no window for the order to fill in between. Returns `1` on success, `0` if the
+  Uses Hyperliquid's `batchModify`, so a reprice costs one round trip instead of
+  the two a cancel-and-replace needs, and leaves no window for the order to fill
+  in between. It does not preserve queue position — the repriced order is a new
+  arrival at its new price level. Returns `1` on success, `0` if the
   exchange rejected the modify, `-1` for an unknown trade ID, and `-2` if the
   order had already filled or been cancelled — so a reprice loop can tell a lost
   race from a genuine failure. The pre-existing `50042` takes a struct
