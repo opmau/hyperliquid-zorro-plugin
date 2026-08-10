@@ -200,6 +200,31 @@ std::string buildCoinForApi(const char* perpDex, const char* coin) {
     return std::string(coin);
 }
 
+// The linker rewrites the PE header timestamp at every link, and this reads it
+// from the image mapped into the process — so the stamp always matches the
+// code that is running, even when the file on disk was replaced after launch.
+// A __DATE__ macro can promise neither: it refreshes only when its own
+// translation unit recompiles, and it describes a file, not the loaded image.
+void formatBuildStamp(char* buf, size_t bufSize) {
+    HMODULE hMod = nullptr;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            reinterpret_cast<LPCSTR>(&formatBuildStamp), &hMod)
+        || !hMod) {
+        strncpy_s(buf, bufSize, "unknown", _TRUNCATE);
+        return;
+    }
+    auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(hMod);
+    auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+        reinterpret_cast<const BYTE*>(hMod) + dos->e_lfanew);
+    time_t linkTime = static_cast<time_t>(nt->FileHeader.TimeDateStamp);
+    struct tm utc;
+    if (gmtime_s(&utc, &linkTime) != 0 ||
+        strftime(buf, bufSize, "%Y-%m-%d %H:%M:%S UTC", &utc) == 0) {
+        strncpy_s(buf, bufSize, "unknown", _TRUNCATE);
+    }
+}
+
 //=============================================================================
 // BrokerOpen - Plugin initialization
 //=============================================================================
@@ -412,9 +437,17 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
 
         if (accounts) accounts[0] = '\0';
 
+        // Level 0 always passes the logger gate, so this prints whatever the
+        // diagnostics setting — a level-1 line is absent from exactly the
+        // sessions that need identifying. It must go THROUGH the queue, not
+        // straight to BrokerMessage: at this point in login Zorro has not
+        // opened the strategy log yet, and only messages drained on a later
+        // tick are captured in it. [OPM-887]
+        char stamp[40];
+        formatBuildStamp(stamp, sizeof(stamp));
         char verMsg[128];
-        sprintf_s(verMsg, "%s %s (build %s)", PLUGIN_NAME, PLUGIN_VERSION, PLUGIN_BUILD);
-        hl::g_logger.log(1, verMsg);
+        sprintf_s(verMsg, "%s %s (build %s)", PLUGIN_NAME, PLUGIN_VERSION, stamp);
+        hl::g_logger.log(0, verMsg);
 
         return 1;
 
