@@ -11,6 +11,7 @@
 // Include the module under test
 #include "hl_http.h"
 #include "hl_globals.h"
+#include "hl_config.h"
 
 // =============================================================================
 // MOCK ZORRO SDK FUNCTIONS
@@ -292,6 +293,102 @@ bool test_exchangeNullBodyNeverRetries() {
 }
 
 // =============================================================================
+// TIMEOUT BOUNDS [OPM-877]
+// =============================================================================
+//
+// A request the exchange never answers holds the calling thread — for a
+// strategy, the thread its trading loop runs on — until the wait gives up.
+// These drive that path directly: http_status never reports a response, so the
+// wait runs to its limit, and the mocked nap() counts how long it waited.
+
+static int s_napCalls = 0;
+
+extern "C" {
+    static int mock_http_status_never_ready(int id) {
+        return 0;  // response never arrives
+    }
+    static int mock_nap_counting(int ms) {
+        ++s_napCalls;
+        return 1;
+    }
+}
+
+// Runs one request against a server that never answers, returning the number of
+// nap intervals waited.
+static int measureWaitIntervals(bool exchangeEndpoint) {
+    auto* savedStatus = http_status;
+    auto* savedNap    = nap;
+    http_status = mock_http_status_never_ready;
+    nap         = mock_nap_counting;
+    s_napCalls  = 0;
+
+    if (exchangeEndpoint) {
+        hl::http::exchangePost("{\"action\":{\"type\":\"order\"}}");
+    } else {
+        hl::http::infoPost("{\"type\":\"l2Book\"}", true);
+    }
+
+    http_status = savedStatus;
+    nap         = savedNap;
+    return s_napCalls;
+}
+
+bool test_queryTimeoutIsBounded() {
+    printf("[TEST] unanswered query gives up at the configured bound...\n");
+
+    strcpy_s(hl::g_config.baseUrl, "https://api.hyperliquid-testnet.xyz");
+    hl::g_config.diagLevel = 0;
+
+    int intervals = measureWaitIntervals(false);
+
+    // An /info query retries a bare null body, and a request that never answers
+    // is not a null body — so this must be a single pass of the wait, not
+    // NULL_RETRY_LIMIT + 1 of them.
+    const int expected = hl::config::HTTP_TIMEOUT_MS / 10;
+    if (intervals != expected) {
+        printf("  FAILED: waited %d intervals, expected %d (%dms at 10ms each)\n",
+               intervals, expected, hl::config::HTTP_TIMEOUT_MS);
+        return false;
+    }
+
+    printf("  PASSED (gave up after %dms, not the former 30000ms)\n",
+           hl::config::HTTP_TIMEOUT_MS);
+    return true;
+}
+
+bool test_exchangeWaitsLongerThanQuery() {
+    printf("[TEST] order action waits longer than a query...\n");
+
+    strcpy_s(hl::g_config.baseUrl, "https://api.hyperliquid-testnet.xyz");
+    hl::g_config.diagLevel = 0;
+
+    int exchangeIntervals = measureWaitIntervals(true);
+    int queryIntervals    = measureWaitIntervals(false);
+
+    // Abandoning a signed, nonced action does not cancel it — the order can
+    // still reach the book with the caller no longer tracking it. Holding the
+    // thread longer is the cheaper failure, so this bound must never be tuned
+    // below the query bound.
+    if (exchangeIntervals <= queryIntervals) {
+        printf("  FAILED: order action waited %d intervals, query %d — an order "
+               "must not be abandoned sooner than a query\n",
+               exchangeIntervals, queryIntervals);
+        return false;
+    }
+
+    const int expected = hl::config::HTTP_EXCHANGE_TIMEOUT_MS / 10;
+    if (exchangeIntervals != expected) {
+        printf("  FAILED: order action waited %d intervals, expected %d\n",
+               exchangeIntervals, expected);
+        return false;
+    }
+
+    printf("  PASSED (order %dms vs query %dms)\n",
+           hl::config::HTTP_EXCHANGE_TIMEOUT_MS, hl::config::HTTP_TIMEOUT_MS);
+    return true;
+}
+
+// =============================================================================
 // MAIN
 // =============================================================================
 
@@ -314,6 +411,8 @@ int main() {
     if (test_nullBodyRecovers()) passed++; else failed++;
     if (test_nullBodyPersistsIsFailure()) passed++; else failed++;
     if (test_exchangeNullBodyNeverRetries()) passed++; else failed++;
+    if (test_queryTimeoutIsBounded()) passed++; else failed++;
+    if (test_exchangeWaitsLongerThanQuery()) passed++; else failed++;
 
     printf("\n============================================\n");
     printf("  Results: %d passed, %d failed\n", passed, failed);

@@ -150,6 +150,10 @@ enum HttpResultCode {
 // the header alongside the contract it documents), then report failure.
 static const int NULL_RETRY_DELAY_MS = 250;
 
+// Granularity of every wait below. nap() yields to Zorro so its message pump
+// keeps running while a request is outstanding.
+static const int NAP_INTERVAL_MS = 10;
+
 // True when the body holds a bare JSON null and nothing else.
 static bool isBareNullBody(const char* body) {
     if (!body) return false;
@@ -167,12 +171,12 @@ static bool napGuarded(int totalMs) {
     while (remaining > 0) {
         int napResult = 0;
         __try {
-            napResult = nap(10);
+            napResult = nap(NAP_INTERVAL_MS);
         } __except(EXCEPTION_EXECUTE_HANDLER) {
             napResult = 0;
         }
         if (!napResult) return false;
-        remaining -= 10;
+        remaining -= NAP_INTERVAL_MS;
     }
     return true;
 }
@@ -182,7 +186,8 @@ static bool napGuarded(int totalMs) {
 // that have C++ objects requiring destructors (like std::string)
 static HttpResultCode sendHttpRaw(const char* fullUrl, const char* body,
                                    const char* method, char* buffer,
-                                   size_t bufferSize, size_t* outResultSize) {
+                                   size_t bufferSize, size_t* outResultSize,
+                                   int timeoutMs) {
     *outResultSize = 0;
 
     // Send request with exception handling (Zorro functions can throw SEH exceptions)
@@ -197,8 +202,11 @@ static HttpResultCode sendHttpRaw(const char* fullUrl, const char* body,
         return HTTP_REQUEST_FAILED;
     }
 
-    // Wait for response (~30 second timeout with 10ms intervals)
-    int waitCount = 3000;
+    // Wait for the response, polling every NAP_INTERVAL_MS. nap() lets Zorro
+    // pump its messages, but the caller makes no progress until this returns,
+    // so timeoutMs bounds how long one unanswered request can hold it up.
+    int waitCount = timeoutMs / NAP_INTERVAL_MS;
+    if (waitCount < 1) waitCount = 1;
     int size = 0;
     while (waitCount > 0) {
         __try {
@@ -212,7 +220,7 @@ static HttpResultCode sendHttpRaw(const char* fullUrl, const char* body,
         // Non-blocking sleep (allows Zorro message processing)
         int napResult = 0;
         __try {
-            napResult = nap(10);
+            napResult = nap(NAP_INTERVAL_MS);
         } __except(EXCEPTION_EXECUTE_HANDLER) {
             napResult = 0;
         }
@@ -261,7 +269,7 @@ static HttpResultCode sendHttpRaw(const char* fullUrl, const char* body,
 // a null body fails immediately and the caller decides what to do.
 static Response sendHttpInternal(const char* fullUrl, const char* body,
                                   const char* method, bool useSmallBuffer,
-                                  bool retryNullBody) {
+                                  bool retryNullBody, int timeoutMs) {
     Response resp;
     resp.statusCode = 0;
 
@@ -286,7 +294,8 @@ static Response sendHttpInternal(const char* fullUrl, const char* body,
     int nullRetries = 0;
 
     for (;;) {
-        result = sendHttpRaw(fullUrl, body, method, buffer, bufferSize, &resultSize);
+        result = sendHttpRaw(fullUrl, body, method, buffer, bufferSize, &resultSize,
+                             timeoutMs);
 
         if (result != HTTP_OK || !isBareNullBody(buffer)) break;
 
@@ -380,18 +389,21 @@ static Response sendHttpInternal(const char* fullUrl, const char* body,
 // =============================================================================
 
 Response post(const char* url, const char* jsonBody, bool useSmallBuffer) {
-    return sendHttpInternal(url, jsonBody, "POST", useSmallBuffer, false);
+    return sendHttpInternal(url, jsonBody, "POST", useSmallBuffer, false,
+                            config::HTTP_TIMEOUT_MS);
 }
 
 Response get(const char* url, bool useSmallBuffer) {
-    return sendHttpInternal(url, nullptr, "GET", useSmallBuffer, false);
+    return sendHttpInternal(url, nullptr, "GET", useSmallBuffer, false,
+                            config::HTTP_TIMEOUT_MS);
 }
 
 Response infoPost(const char* jsonBody, bool useSmallBuffer) {
     char url[512];
     buildUrl("/info", url, sizeof(url));
     // Read-only query: safe to re-send on a bare `null` body.
-    return sendHttpInternal(url, jsonBody, "POST", useSmallBuffer, true);
+    return sendHttpInternal(url, jsonBody, "POST", useSmallBuffer, true,
+                            config::HTTP_TIMEOUT_MS);
 }
 
 Response infoPostPerpDex(const char* jsonBody, const char* perpDex, bool useSmallBuffer) {
@@ -410,8 +422,10 @@ Response exchangePost(const char* jsonBody) {
     char url[512];
     buildUrl("/exchange", url, sizeof(url));
     // Large buffer always; never retry — the payload is signed and nonced, and
-    // a replay can mask an order that actually reached the book.
-    return sendHttpInternal(url, jsonBody, "POST", false, false);
+    // a replay can mask an order that actually reached the book. Given longer
+    // than a query for the same reason: giving up does not cancel the action.
+    return sendHttpInternal(url, jsonBody, "POST", false, false,
+                            config::HTTP_EXCHANGE_TIMEOUT_MS);
 }
 
 } // namespace http

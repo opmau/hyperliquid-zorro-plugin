@@ -25,7 +25,17 @@ constexpr const char* TESTNET_WS   = "wss://api.hyperliquid-testnet.xyz/ws";
 // HTTP TIMEOUTS (milliseconds)
 // =============================================================================
 
-constexpr int HTTP_TIMEOUT_MS = 10000;  // 10 seconds for HTTP requests
+// Queries (/info, and plain get/post). These run on the caller's thread, which
+// for a strategy is the thread its trading loop runs on, so the bound is a
+// bound on how long the strategy can be held up by one unanswered request.
+constexpr int HTTP_TIMEOUT_MS = 10000;  // 10 seconds for HTTP queries
+
+// Order actions (/exchange) are deliberately given longer. Abandoning one of
+// these does not cancel it: the payload is signed and nonced, so an action the
+// caller has given up on can still reach the book, and the caller then holds no
+// record of an order that exists. Waiting longer is the cheaper failure, so
+// this is not lowered to match the query bound.
+constexpr int HTTP_EXCHANGE_TIMEOUT_MS = 30000;  // 30 seconds for order actions
 
 // =============================================================================
 // WEBSOCKET SETTINGS (milliseconds)
