@@ -51,6 +51,24 @@ extern "C" {
     int (*nap)(int) = mock_nap;
 }
 
+// A programmable http_result: serves a bare `null` for the first N calls, then
+// real data. Lets the null-retry path be exercised end to end.
+static int s_nullsRemaining = 0;
+static int s_resultCalls    = 0;
+
+extern "C" {
+    static size_t mock_http_result_scripted(int id, char* content, size_t size) {
+        ++s_resultCalls;
+        const char* body = "{\"status\":\"ok\"}";
+        if (s_nullsRemaining > 0) {
+            --s_nullsRemaining;
+            body = "null";
+        }
+        strncpy_s(content, size, body, _TRUNCATE);
+        return strlen(body);
+    }
+}
+
 // =============================================================================
 // TESTS
 // =============================================================================
@@ -177,6 +195,73 @@ bool test_Response() {
     return true;
 }
 
+bool test_nullBodyRecovers() {
+    printf("[TEST] null body retried, then recovers...\n");
+
+    strcpy_s(hl::g_config.baseUrl, "https://api.hyperliquid-testnet.xyz");
+    hl::g_config.diagLevel = 0;
+
+    auto* saved = http_result;
+    http_result = mock_http_result_scripted;
+    s_nullsRemaining = 2;      // two nulls, then real data
+    s_resultCalls = 0;
+
+    auto resp = hl::http::infoPost("{\"type\":\"meta\"}", true);
+
+    http_result = saved;
+
+    if (!resp.success()) {
+        printf("  FAILED: should have recovered, got error '%s'\n", resp.error.c_str());
+        return false;
+    }
+    if (resp.body != "{\"status\":\"ok\"}") {
+        printf("  FAILED: expected the recovered body, got '%s'\n", resp.body.c_str());
+        return false;
+    }
+    if (s_resultCalls != 3) {
+        printf("  FAILED: expected 3 attempts (2 null + 1 good), got %d\n", s_resultCalls);
+        return false;
+    }
+
+    printf("  PASSED (recovered on attempt %d)\n", s_resultCalls);
+    return true;
+}
+
+bool test_nullBodyPersistsIsFailure() {
+    printf("[TEST] persistent null body reported as failure...\n");
+
+    strcpy_s(hl::g_config.baseUrl, "https://api.hyperliquid-testnet.xyz");
+    hl::g_config.diagLevel = 0;
+
+    auto* saved = http_result;
+    http_result = mock_http_result_scripted;
+    s_nullsRemaining = 999;    // never recovers
+    s_resultCalls = 0;
+
+    auto resp = hl::http::infoPost("{\"type\":\"clearinghouseState\"}", true);
+
+    http_result = saved;
+
+    // The whole point: `null` must NOT reach the caller as a valid response,
+    // or it gets parsed into zeros and read as an empty account.
+    if (resp.success()) {
+        printf("  FAILED: null body reported as success, body '%s'\n", resp.body.c_str());
+        return false;
+    }
+    if (!resp.failed()) {
+        printf("  FAILED: expected failed() to be true\n");
+        return false;
+    }
+    if (s_resultCalls != hl::http::NULL_RETRY_LIMIT + 1) {
+        printf("  FAILED: expected %d attempts, got %d\n",
+               hl::http::NULL_RETRY_LIMIT + 1, s_resultCalls);
+        return false;
+    }
+
+    printf("  PASSED (failed after %d attempts)\n", s_resultCalls);
+    return true;
+}
+
 // =============================================================================
 // MAIN
 // =============================================================================
@@ -197,6 +282,8 @@ int main() {
     if (test_injectPerpDex()) passed++; else failed++;
     if (test_Response()) passed++; else failed++;
     if (test_infoPost()) passed++; else failed++;
+    if (test_nullBodyRecovers()) passed++; else failed++;
+    if (test_nullBodyPersistsIsFailure()) passed++; else failed++;
 
     printf("\n============================================\n");
     printf("  Results: %d passed, %d failed\n", passed, failed);
