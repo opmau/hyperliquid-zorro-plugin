@@ -193,5 +193,42 @@ inline CollateralView computeCollateral(double perpsAccountValue,
     return view;
 }
 
+// =============================================================================
+// ZORRO ACCOUNT SPLIT
+// =============================================================================
+
+/// The pair of figures BrokerAccount hands to Zorro.
+struct ZorroAccountSplit {
+    double balance = 0.0;   // *pBalance  — cash basis, excluding open-trade PnL
+    double tradeVal = 0.0;  // *pTradeVal — value of all open trades
+};
+
+/// Split marked-to-market equity into the balance and open-trade value Zorro
+/// expects from BrokerAccount.
+///
+/// Zorro documents *pTradeVal as "the difference between account equity and
+/// returned balance value", so it reconstructs equity as balance + tradeVal,
+/// and it adds the profit it tracks per open trade when the plugin supplies no
+/// trade value of its own. Every equity figure Hyperliquid publishes is already
+/// marked to market, so reporting one as *pBalance counts open PnL twice —
+/// reported equity then moves $2 for every $1 the book moves.
+///
+/// Taking the open PnL back out restores the cash basis Zorro is asking for:
+///
+///     balance  = equity - openPnl
+///     tradeVal = openPnl
+///
+/// Balance is free to go negative, when open profit exceeds deposited capital.
+/// That is the honest cash basis and it still reconstructs the right equity.
+///
+/// @param equity  Tradeable equity, from computeCollateral()
+/// @param openPnl Unrealized PnL summed across open positions
+inline ZorroAccountSplit splitEquityForZorro(double equity, double openPnl) {
+    ZorroAccountSplit split;
+    split.tradeVal = openPnl;
+    split.balance = equity - openPnl;
+    return split;
+}
+
 } // namespace account
 } // namespace hl
