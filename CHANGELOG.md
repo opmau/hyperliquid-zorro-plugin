@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`brokerCommand(50045, TradeID)` returns the exchange order ID for a trade.**
+  Hyperliquid's `/info` fill and order endpoints identify an order by its `oid`
+  and carry no Zorro trade ID, so a strategy reconciling its own records against
+  the exchange previously had no join key: every fill the exchange reported was
+  unattributable, and therefore indistinguishable from a liquidation, an
+  auto-deleverage or a manual trade on the same address.
+
+  The return is a `var`. `0` means the trade has no exchange order ID — it is not
+  tracked, it has not been acknowledged yet, or the position was adopted rather
+  than opened by this session. It is also what earlier builds return for an
+  unrecognised command, so a strategy using it runs unmodified against both.
+  See `docs/BROKERCOMMAND_REFERENCE.md` [OPM-1085].
+
 ## [2.2.0] — 2026-08-10
 
 Corrects the account equity reported to Zorro on Hyperliquid's unified and

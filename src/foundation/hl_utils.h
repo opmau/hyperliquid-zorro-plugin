@@ -47,6 +47,13 @@ bool isTifValidForModify(const char* tif);
 // built from one submits a well-formed cancel for oid 0 and reports success.
 bool isExchangeOrderId(const char* oid);
 
+// Exchange order ID as a double, for interfaces that carry only a scalar.
+// Returns 0 for a synthetic ID (see isExchangeOrderId), and 0 rather than a
+// rounded value for an ID beyond the range a double holds exactly. An order ID
+// is a join key against the exchange's own records, so a silently wrong one is
+// worse than an absent one.
+double exchangeOrderIdToDouble(const char* oid);
+
 // Lenient coin comparison across the plugin's three spellings of an asset:
 // the exchange's ("BTC", "xyz:TSLA"), Zorro's display name ("BTC-USDC_xyz")
 // and the API form buildCoinForApi() derives from it ("xyz:BTC-USDC").

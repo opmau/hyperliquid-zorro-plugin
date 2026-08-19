@@ -134,6 +134,7 @@ if (!id) {
 | 50042 | `HL_MODIFY_ORDER` | `ModifyRequest*` | `1` on success |
 | 50043 | `HL_PLACE_BRACKET` | `BracketRequest*` | Entry trade ID |
 | 50044 | `HL_MODIFY_BY_TRADEID` | `double[3]` | See below |
+| 50045 | `HL_GET_ORDER_OID` | `TradeID` | Exchange order ID, or `0` |
 
 **`50040`, `50042` and `50043` are not callable from Lite-C.** Their request
 structs contain `std::string` members, so they are reachable only from C++.
@@ -219,6 +220,45 @@ order is gone, re-read the position", not as an error.
 
 If the trade has a resting **close** order against it, `50044` reprices that
 close order (reduce-only), not the filled entry.
+
+#### `50045` — the exchange's order ID for a trade
+
+```c
+ThisTrade = enterLong();
+
+var oid = brokerCommand(50045, TradeID);
+```
+
+Returns the order ID (`oid`) the exchange assigned to that trade's order, which
+is the join key between a strategy's own records and the exchange's. `userFills`
+and the other `/info` order endpoints report an `oid` and no Zorro trade ID, so
+without it every fill the exchange reports is unattributable — and so is
+indistinguishable from a liquidation, an auto-deleverage, or a manual trade on
+the same address.
+
+Keyed by trade ID rather than "the most recent order", because an order can fill
+in slices across bars and several can be working at once, which is exactly when
+"most recent" stops being well defined.
+
+The return is a `var`, not a string. Order IDs are integers well inside the range
+a `var` holds exactly, so the value compares equal to the exchange's own.
+
+`0` means **no exchange order ID**, in every case:
+
+| Case | Why it has no ID |
+|------|------------------|
+| Trade ID is not tracked | Nothing to look up. Includes `0` and the `-1` Zorro uses for a `TradeUUID` trade |
+| Order has not reached the exchange yet | The exchange assigns the ID on acknowledgement |
+| Position was adopted, not opened by this session | Resumed and imported positions are tracked without an originating order |
+
+A resumed or imported position is tracked under an internal placeholder that
+contains digits. Those are never parsed into a return value: a number that names
+some unrelated order is worse than no number at all, since only the second is
+detectable by the caller.
+
+`0` is also what a plugin build predating this command returns, because
+unrecognised codes in this range fall through without touching the caller — so a
+strategy written against this contract runs unmodified against either.
 
 ### Export
 
