@@ -127,6 +127,18 @@ bool isExchangeOrderId(const char* oid) {
     return _atoi64(oid) > 0;
 }
 
+double exchangeOrderIdToDouble(const char* oid) {
+    if (!isExchangeOrderId(oid)) return 0.0;
+
+    // A double represents every integer up to 2^53 exactly and none above it,
+    // so a larger ID would come back altered. _atoi64 also saturates at
+    // _I64_MAX on an over-long digit string, which this same bound catches.
+    const int64_t MAX_EXACT_IN_DOUBLE = 9007199254740992LL;  // 2^53
+    int64_t id = _atoi64(oid);
+    if (id > MAX_EXACT_IN_DOUBLE) return 0.0;
+    return (double)id;
+}
+
 // Split "xyz:BTC-USDC" into dex="xyz", base="BTC". Spot pairs ("PURR/USDC")
 // and index names ("@107") contain no dash and pass through untouched.
 static void splitCoinParts(const char* coin, std::string& dex, std::string& base) {
