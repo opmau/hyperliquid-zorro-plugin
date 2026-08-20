@@ -11,6 +11,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] — 2026-08-20
+
+Adds a way to match a Zorro trade against the order the exchange reports for
+it. Existing strategies need no changes to upgrade.
+
+### Added
+
+- **`brokerCommand(50045, TradeID)` returns the exchange order ID for a trade.**
+  Hyperliquid's `/info` fill and order endpoints identify an order by its `oid`
+  and carry no Zorro trade ID, so a strategy reconciling its own records against
+  the exchange previously had no join key: every fill the exchange reported was
+  unattributable, and therefore indistinguishable from a liquidation, an
+  auto-deleverage or a manual trade on the same address.
+
+  The return is a `var`. `0` means the trade has no exchange order ID — it is not
+  tracked, it has not been acknowledged yet, or the position was adopted rather
+  than opened by this session. It is also what earlier builds return for an
+  unrecognised command, so a strategy using it runs unmodified against both.
+  See `docs/BROKERCOMMAND_REFERENCE.md` [OPM-1085].
+
+### Fixed
+
+- **Building from source resolves its dependencies again.** A vcpkg revision
+  pins exact versions of the MSYS2 packages it acquires for build tooling, and
+  the mirrors serve only current versions — so a pin stops resolving once those
+  versions are superseded, and the build fails before compiling anything. The
+  pin now names the 2026.01.16 vcpkg release, which moves IXWebSocket from
+  11.4.5 to 11.4.6 and mbedTLS from 3.6.1 to 3.6.4. Binaries attached to a
+  release are unaffected [OPM-1086].
+
 ## [2.2.0] — 2026-08-10
 
 Corrects the account equity reported to Zorro on Hyperliquid's unified and
@@ -470,7 +500,8 @@ First production release of the refactored plugin.
 
 ---
 
-[Unreleased]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.0.7...v2.1.0
 [2.0.7]: https://github.com/opmau/hyperliquid-zorro-plugin/compare/v2.0.6...v2.0.7

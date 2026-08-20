@@ -68,10 +68,10 @@
 // Keep in step with project(... VERSION ...) in CMakeLists.txt and CHANGELOG.md.
 #ifdef DEV_BUILD
   #define PLUGIN_NAME "Hyperliquid-DEV"
-  #define PLUGIN_VERSION "2.2.0-DEV"
+  #define PLUGIN_VERSION "2.3.0-DEV"
 #else
   #define PLUGIN_NAME "Hyperliquid"
-  #define PLUGIN_VERSION "2.2.0"
+  #define PLUGIN_VERSION "2.3.0"
 #endif
 
 // Format the running DLL's link time (defined in hl_broker.cpp). Identifies
@@ -101,6 +101,8 @@ void formatBuildStamp(char* buf, size_t bufSize);
 #define HL_PLACE_BRACKET       50043  // Bracket order: param=BracketRequest* [OPM-79]
 #define HL_MODIFY_BY_TRADEID   50044  // Reprice by trade ID: param=double[3]
                                       // {tradeId, newPrice, newSize} [OPM-793]
+#define HL_GET_ORDER_OID       50045  // Exchange order ID for a trade ID:
+                                      // param=tradeId, returns oid [OPM-1085]
 
 // Zorro runtime function pointer (defined in hl_broker.cpp, used by BrokerAccount)
 extern "C" { extern int (*nap)(int); }

@@ -17,6 +17,7 @@
 //   50030-50032  Force WS disconnect, funding rate, scheduleCancel
 //   50040-50041  TWAP place / cancel
 //   50042-50044  Modify (struct), bracket, modify-by-tradeID  [OPM-793]
+//   50045        Exchange order ID for a trade ID         [OPM-1085]
 //=============================================================================
 
 #include "hl_broker_internal.h"
@@ -133,6 +134,36 @@ double handleHyperliquidCommand(int mode, intptr_t parameter) {
         const double* p = (const double*)parameter;
         return (double)hl::trading::modifyByTradeId(
             (int)p[0], p[1], p[2]);
+    }
+
+    case HL_GET_ORDER_OID: {
+        // [OPM-1085] The exchange's own order ID for one of the strategy's
+        // trades, so the strategy can match its records against the fills the
+        // exchange reports. Without that join key every exchange fill reads as
+        // one nobody placed, which is also how a liquidation, an
+        // auto-deleverage and a manual trade on the same address read.
+        //
+        //   ThisTrade = enterLong();
+        //   var oid = brokerCommand(50045, TradeID);
+        //
+        // Keyed by trade ID rather than "the most recent order": an order can
+        // fill in slices across bars, and several can be working at once.
+        int tradeId = (int)parameter;
+
+        hl::OrderState state;
+        if (tradeId <= 0 || !hl::trading::getOrder(tradeId, state)) {
+            if (hl::g_config.diagLevel >= 2) {
+                char msg[80];
+                sprintf_s(msg, "HL_GET_ORDER_OID: trade %d not tracked", tradeId);
+                hl::g_logger.log(2, msg);
+            }
+            return 0;
+        }
+
+        // A tracked trade need not carry an exchange ID: the map also holds the
+        // synthetic forms (PENDING_/RESUMED_/IMPORTED_/DRY_RUN) [OPM-797].
+        // Those report "no ID" rather than a parsed prefix.
+        return hl::utils::exchangeOrderIdToDouble(state.orderId);
     }
 
     case HL_SET_ACCOUNT_MODE: {
