@@ -68,10 +68,10 @@
 // Keep in step with project(... VERSION ...) in CMakeLists.txt and CHANGELOG.md.
 #ifdef DEV_BUILD
   #define PLUGIN_NAME "Hyperliquid-DEV"
-  #define PLUGIN_VERSION "2.2.0-DEV"
+  #define PLUGIN_VERSION "2.3.0-DEV"
 #else
   #define PLUGIN_NAME "Hyperliquid"
-  #define PLUGIN_VERSION "2.2.0"
+  #define PLUGIN_VERSION "2.3.0"
 #endif
 
 // Format the running DLL's link time (defined in hl_broker.cpp). Identifies
