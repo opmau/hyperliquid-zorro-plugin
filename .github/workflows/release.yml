@@ -69,8 +69,10 @@ jobs:
         with:
           # Must be a full 40-char commit SHA, not a release tag — run-vcpkg
           # rejects tags ("commit id must be a full SHA1 hash"). This SHA is the
-          # 2024.11.16 release tag (git ls-remote refs/tags/2024.11.16).
-          vcpkgGitCommitId: 'b2cb0da531c2f1f740045bfe7c4dac59f0b2b69c'
+          # 2026.01.16 release tag: run `git ls-remote --tags` and take the
+          # dereferenced `^{}` entry, because an annotated tag's own object SHA
+          # is not a commit. Keep in step with ci.yml and vcpkg.json.
+          vcpkgGitCommitId: '66c0373dc7fca549e5803087b9487edfe3aca0a1'
           runVcpkgInstall: false
 
       # Proprietary Zorro SDK headers (not committed — include/ is gitignored).

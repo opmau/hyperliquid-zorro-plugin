@@ -51,8 +51,12 @@ jobs:
       - name: Set up vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          # Full 40-char commit SHA of the 2024.11.16 vcpkg release tag.
-          vcpkgGitCommitId: 'b2cb0da531c2f1f740045bfe7c4dac59f0b2b69c'
+          # Full 40-char commit SHA of the 2026.01.16 vcpkg release tag. Keep it
+          # in step with builtin-baseline in vcpkg.json; the two must resolve the
+          # same port versions. A vcpkg revision pins exact MSYS2 package versions
+          # for the build tools it acquires, and the MSYS2 mirrors carry only
+          # current versions — so this pin moves forward, never back.
+          vcpkgGitCommitId: '66c0373dc7fca549e5803087b9487edfe3aca0a1'
           runVcpkgInstall: false
 
       # The Zorro SDK headers (include/trading.h, include/variables.h) are
