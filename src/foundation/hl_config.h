@@ -67,6 +67,15 @@ constexpr int META_CACHE_SECONDS       = 300;    // 5 minutes for asset metadata
 constexpr int HTTP_SEED_COOLDOWN_MS    = 1000;   // 1s between HTTP seeds per symbol
 
 // =============================================================================
+// DIAGNOSTICS
+// =============================================================================
+
+// How often the price-lookup path summarises which source answered its calls.
+// Time-based rather than call-based so the log volume is the same whether one
+// symbol is quoted or a hundred. [OPM-1113]
+constexpr int PRICE_SOURCE_REPORT_MS   = 60000;  // One summary line per minute
+
+// =============================================================================
 // ORDER DEFAULTS
 // =============================================================================
 

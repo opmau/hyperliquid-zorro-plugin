@@ -6,6 +6,7 @@
 
 #include "hl_market_service.h"
 #include "hl_meta.h"
+#include "hl_price_source_stats.h"
 #include "../foundation/hl_globals.h"
 #include "../foundation/hl_utils.h"
 #include "../transport/hl_http.h"
@@ -47,6 +48,16 @@ static void logMsg(int level, const char* prefix, const char* msg) {
         sprintf_s(buf, "%s: %s", prefix, msg);
         g_logger.log(level, buf);
     }
+}
+
+// Count where a lookup was answered from, and emit one summary line per
+// interval. Wrapping the returned value tallies at the point of return, so no
+// path can be double-counted or missed. [OPM-1113]
+static PriceData tallied(const PriceData& px, PriceSource src) {
+    char line[192];
+    if (recordPriceSource(src, GetTickCount(), config::PRICE_SOURCE_REPORT_MS, line, sizeof(line)))
+        logMsg(1, "price source", line);
+    return px;
 }
 
 // =============================================================================
@@ -133,7 +144,7 @@ PriceData getPrice(const char* coin, uint32_t maxAgeMs) {
             result.ask = ask;
             result.mid = (bid + ask) / 2.0;
             result.timestamp = GetTickCount();
-            return result;
+            return tallied(result, PriceSource::WsFresh);
         }
 
         // Remember stale data if under hard staleness cap (PRICE_STALE_MS = 5s)
@@ -179,7 +190,7 @@ PriceData getPrice(const char* coin, uint32_t maxAgeMs) {
                         result.ask = ask;
                         result.mid = (bid + ask) / 2.0;
                         result.timestamp = GetTickCount();
-                        return result;
+                        return tallied(result, PriceSource::WsAfterWait);
                     }
                 }
                 if (g_config.diagLevel >= 1) {
@@ -207,8 +218,9 @@ PriceData getPrice(const char* coin, uint32_t maxAgeMs) {
             result.ask = staleAsk;
             result.mid = (staleBid + staleAsk) / 2.0;
             result.timestamp = GetTickCount();
+            return tallied(result, PriceSource::WsStale);
         }
-        return result;
+        return tallied(result, PriceSource::Unavailable);
     }
 
     // Fetch via HTTP l2Book
@@ -218,7 +230,7 @@ PriceData getPrice(const char* coin, uint32_t maxAgeMs) {
     http::Response resp = http::infoPost(payload, true);
     if (!resp.success()) {
         logMsg(1, "getPrice", "HTTP l2Book fetch failed");
-        return result;
+        return tallied(result, PriceSource::HttpFailed);
     }
 
     // "null" response = asset does not exist on exchange — halt immediately
@@ -226,17 +238,17 @@ PriceData getPrice(const char* coin, uint32_t maxAgeMs) {
         g_fatalError = true;
         sprintf_s(g_fatalErrorMsg, "Symbol '%s' not found on exchange", coin);
         g_logger.logf(1, "FATAL: %s", g_fatalErrorMsg);
-        return result;
+        return tallied(result, PriceSource::HttpFailed);
     }
 
     // Parse bid/ask from response using yyjson
     // Format: {"levels":[[{"px":"50000",...}],[{"px":"50001",...}]]}
     const char* jsonStr = resp.body.c_str();
     yyjson_doc* doc = yyjson_read(jsonStr, resp.body.size(), 0);
-    if (!doc) return result;
+    if (!doc) return tallied(result, PriceSource::HttpFailed);
     yyjson_val* root = yyjson_doc_get_root(doc);
     yyjson_val* levels = json::getArray(root, "levels");
-    if (!levels) { yyjson_doc_free(doc); return result; }
+    if (!levels) { yyjson_doc_free(doc); return tallied(result, PriceSource::HttpFailed); }
 
     double httpBid = 0.0, httpAsk = 0.0;
     yyjson_val* bids = yyjson_arr_get(levels, 0);
@@ -272,7 +284,7 @@ PriceData getPrice(const char* coin, uint32_t maxAgeMs) {
         }
     }
 
-    return result;
+    return tallied(result, result.bid > 0.0 ? PriceSource::HttpOk : PriceSource::HttpFailed);
 }
 
 PriceData getPerpDexPrice(const char* perpDex, const char* coin, uint32_t maxAgeMs) {
@@ -296,27 +308,27 @@ PriceData getPerpDexPrice(const char* perpDex, const char* coin, uint32_t maxAge
             result.ask = ask;
             result.mid = (bid + ask) / 2.0;
             result.timestamp = GetTickCount();
-            return result;
+            return tallied(result, PriceSource::WsFresh);
         }
     }
 
     // HTTP fallback for perpDex
-    if (!canSeedHttp(apiCoin)) return result;
+    if (!canSeedHttp(apiCoin)) return tallied(result, PriceSource::Unavailable);
 
     char payload[128];
     sprintf_s(payload, "{\"type\":\"l2Book\",\"coin\":\"%s\",\"nSigFigs\":5}", apiCoin);
 
     http::Response resp = http::infoPost(payload, true);
-    if (!resp.success()) return result;
+    if (!resp.success()) return tallied(result, PriceSource::HttpFailed);
 
     // Parse bid/ask from l2Book response using yyjson
     // Format: {"levels":[[{"px":"50000",...}],[{"px":"50001",...}]]}
     const char* jsonStr = resp.body.c_str();
     yyjson_doc* doc = yyjson_read(jsonStr, resp.body.size(), 0);
-    if (!doc) return result;
+    if (!doc) return tallied(result, PriceSource::HttpFailed);
     yyjson_val* root = yyjson_doc_get_root(doc);
     yyjson_val* levels = json::getArray(root, "levels");
-    if (!levels) { yyjson_doc_free(doc); return result; }
+    if (!levels) { yyjson_doc_free(doc); return tallied(result, PriceSource::HttpFailed); }
 
     double httpBid = 0.0, httpAsk = 0.0;
     yyjson_val* bids = yyjson_arr_get(levels, 0);
@@ -353,7 +365,7 @@ PriceData getPerpDexPrice(const char* perpDex, const char* coin, uint32_t maxAge
         recordSeed(apiCoin);
     }
 
-    return result;
+    return tallied(result, result.bid > 0.0 ? PriceSource::HttpOk : PriceSource::HttpFailed);
 }
 
 double getFundingRate(const char* coin) {
