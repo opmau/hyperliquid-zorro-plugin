@@ -172,9 +172,11 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         // Parameter: 4=last(mid), 5=ask, 6=bid
         int priceType = (int)parameter;
 
-        // Use priceSymbol (set by SET_SYMBOL) — the ONLY reliable asset context.
-        // BrokerAsset subscription loops overwrite currentSymbol for every asset,
-        // so currentSymbol is NOT safe for GET_PRICE. [OPM-6]
+        // Read priceSymbol rather than currentSymbol — but the two are currently
+        // identical: SET_SYMBOL and BrokerAsset each write BOTH fields, so neither
+        // is isolated from the subscription loop and priceSymbol is not the "only
+        // reliable asset context" an earlier comment here claimed. The caller must
+        // SET_SYMBOL immediately before asking for a price. [OPM-6, OPM-1132]
         if (!hl::g_trading.priceSymbol[0]) {
             // Always log — this is a data loss event the strategy needs to see
             hl::g_logger.logf(1, "GET_PRICE(%d): priceSymbol empty (no SET_SYMBOL), "

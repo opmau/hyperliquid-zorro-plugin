@@ -108,8 +108,16 @@ struct TradingState {
     // Current asset context (set by SET_SYMBOL or BrokerAsset, used by GET_POSITION etc.)
     char currentSymbol[64] = {0};
 
-    // Price lookup symbol (set ONLY by SET_SYMBOL, used by GET_PRICE)
-    // Isolates GET_PRICE from BrokerAsset subscription loops that overwrite currentSymbol.
+    // Price lookup symbol, read by GET_PRICE.
+    // Written by BOTH writers of currentSymbol - SET_SYMBOL (hl_broker_commands.cpp)
+    // and BrokerAsset (hl_broker_market.cpp) - and always with the same value, so
+    // today this is a byte-for-byte duplicate of currentSymbol and isolates GET_PRICE
+    // from NOTHING: a subscription loop leaves it on the last asset polled. An earlier
+    // comment here claimed SET_SYMBOL was the only writer; it never was. The field is
+    // kept separate because GET_PRICE reads it, so removing the BrokerAsset write
+    // would make the isolation real without touching GET_PRICE. Until that decision
+    // is taken, a strategy MUST call SET_SYMBOL immediately before every GET_PRICE.
+    // [OPM-1132]
     char priceSymbol[64] = {0};
 
     // Trade tracking: Zorro trade ID -> OrderState
