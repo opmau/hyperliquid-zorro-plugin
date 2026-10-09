@@ -284,6 +284,16 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
         hl::g_logger.log(1, msg);
     }
 
+    // [OPM-1552] UUID mode: Zorro reads the identifier with GET_UUID and hands
+    // it back for every later call on this trade. Close and trigger orders are
+    // not trades of their own, so they keep their int ID.
+    if (hl::g_trading.uuidTrades && !isCloseOrder && !isTriggerOrder) {
+        hl::OrderState placed;
+        const char* cloid = result.cloid.c_str();
+        if (!*cloid && hl::trading::getOrder(tradeId, placed)) cloid = placed.cloid;
+        if (uuidRecordOpened(coinForApi.c_str(), request.side, cloid)) return -1;
+    }
+
     return tradeId;
 }
 
@@ -298,6 +308,14 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
     if (pClose) *pClose = 0;
     if (pCost) *pCost = 0;
     if (pProfit) *pProfit = 0;
+
+    // [OPM-1552] UUID trade: Zorro sent the identifier with SET_UUID first.
+    // Success returns the ID Zorro passed (-1), failure 0.
+    if (tradeId == -1) {
+        int id = uuidTradeForClose();
+        if (!id) return 0;
+        return BrokerSell2(id, amount, limit, pClose, pCost, pProfit, pFill) ? -1 : 0;
+    }
 
     if (hl::g_config.diagLevel >= 1) {
         char msg[128];

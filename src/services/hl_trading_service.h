@@ -205,11 +205,13 @@ void notifyFill(const char* cloid, double filledSize, double avgPrice, const cha
 // INITIALIZATION
 // =============================================================================
 
-/// Initialize trading service (call once at login)
-void init();
+/// Start a broker session (call at login). `owner` identifies the account,
+/// e.g. "<wallet>@mainnet". Returns true when the account matches the previous
+/// session and its tracked trades were kept; false when tracking starts empty.
+bool beginSession(const char* owner);
 
-/// Cleanup trading service (call at logout)
-void cleanup();
+/// End a broker session (call at logout). Tracked trades are kept.
+void endSession();
 
 } // namespace trading
 } // namespace hl

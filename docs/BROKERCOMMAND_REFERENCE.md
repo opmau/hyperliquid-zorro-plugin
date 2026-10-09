@@ -70,6 +70,9 @@ would be a guaranteed reject.
 | `GET_TRADES` (71) | `TRADE*` | count | Imports broker positions into Zorro |
 | `DO_CANCEL` (301) | trade ID | `1`/`0` | Cancels that order. If a resting **close** order exists for the position, cancels that instead of the filled entry |
 | `DO_CANCEL` (301) | `0` | count | Cancels every resting order for the current `SET_SYMBOL`, or account-wide if none is set |
+| `DO_CANCEL` (301) | `-1` | `1`/`0` | Cancels the order of the trade named by the last `SET_UUID` |
+| `GET_UUID` (154) | `char[256]` | `1`/`0` | Copies the identifier of the trade just opened. Only with `50046` on |
+| `SET_UUID` (155) | identifier `string` | `1` | Names the trade the next `BrokerTrade`, `BrokerSell2` or `DO_CANCEL(-1)` acts on |
 
 ---
 
@@ -83,11 +86,66 @@ would be a guaranteed reject.
 | 50011 | `HL_ENABLE_WEBSOCKET` | `1`/`0` | `1` on success |
 | 50012 | `HL_SET_ORDER_TYPE` | `"Ioc"`/`"Gtc"`/`"Alo"` | `1`, or `0` if invalid |
 | 50021 | `HL_SET_ACCOUNT_MODE` | `0`=API wallet, `1`=vault | `1` |
+| 50046 | `HL_SET_UUID_TRADES` | `1`/`0` | The value set — see below |
 
 `50012` accepts any casing and stores the canonical form. This matters: the
 signing path canonicalizes and the JSON path did not, so a non-canonical string
 used to produce a signature mismatch that Hyperliquid reports as the very
 misleading *"User or API Wallet does not exist"*.
+
+#### `50046` — trades that survive a restart
+
+By default the plugin identifies each trade to Zorro by a number that only it
+can resolve. A trade whose number the plugin no longer tracks, such as one
+Zorro resumes from its `.trd` file after Zorro is restarted, cannot be closed
+through the plugin: the close fails with `Trade not found`.
+
+```c
+function run()
+{
+    if (is(INITRUN)) brokerCommand(50046, 1);
+    ...
+}
+```
+
+With `50046` on, `BrokerBuy2` returns `-1` for an opening order and Zorro reads
+the trade's identifier with `GET_UUID`. The identifier names the coin, the side
+and the order's client order ID, in the form `HL1|<coin>|<L or S>|<cloid>`.
+Zorro saves it with the trade and sends it with `SET_UUID` before every later
+call on that trade, so the plugin can find a trade it no longer tracks by
+looking up the opening order on the exchange.
+
+| Situation | What the plugin does |
+|-----------|----------------------|
+| The plugin tracks the trade | Acts on it exactly as for a numbered trade |
+| The plugin does not track it (e.g. after a restart) | `BrokerTrade` returns `NAY`, so Zorro keeps the trade open on its own record. `BrokerSell2` looks up the opening order, tracks the trade again and closes the amount Zorro requests, reduce-only. `DO_CANCEL(-1)` cancels the opening order if the exchange still shows it working |
+| The trade was rebuilt by such a close | `BrokerTrade` keeps returning `NAY`; Zorro's record of the open amount stays authoritative |
+| The opening order is not found on the exchange | `BrokerSell2` and `DO_CANCEL(-1)` return `0`, and the close fails as it would without `50046` |
+
+- **Trades opened before `50046` was turned on keep their numbers.** Turn it on
+  in `INITRUN` and leave it on; turning it off does not change trades that
+  already carry an identifier.
+- **An order that cannot be named keeps a number.** If no identifier can be
+  built for an opening order (no client order ID, or a coin name longer than 31
+  characters or containing `|`), `BrokerBuy2` returns an int trade ID and logs
+  `UUID: cannot build an identifier ... - reporting an int trade ID`.
+- **Profit on a trade the plugin does not track is Zorro's estimate.** The
+  exchange's order lookup reports the filled size but no fill price.
+- **`TradeID` is Zorro's own number for the trade, not the plugin's.**
+  `50044` and `50045` cannot address a UUID trade: they take the plugin's trade
+  ID, which a UUID trade does not expose.
+- A logout and login on the same account in the same Zorro session keeps every
+  trade the plugin tracks, with or without `50046`. A login to a different
+  account or network starts empty and turns `50046` off.
+
+Log lines that show it working, at diagnostic level 1:
+
+| Line | Meaning |
+|------|---------|
+| `UUID trade identifiers on` | `50046` was accepted |
+| `BrokerLogin: same account, N tracked trades kept` | A re-login kept the plugin's trades |
+| `UUID: adopted <coin> <long or short> <cloid> as trade N` | A trade the plugin did not track was found on the exchange for a close |
+| `UUID: <coin> <cloid> not confirmed by the exchange` | The opening order was not found, so the close fails |
 
 ### Queries
 
@@ -192,10 +250,9 @@ still `0` until it fills, so a chase loop can reprice without waiting for a
 fill. Inside a `for(open_trades)` loop `TradeID` refers to the trade being
 iterated, which is the other way to reach it.
 
-Pass a positive `TradeID`. Zorro sets it to `-1` for a trade identified by a
-`TradeUUID` string rather than a number, and `50044` returns `-1` for an
-untracked trade — so passing one straight through is indistinguishable from a
-failed lookup.
+Pass the `TradeID` of a numbered trade. Do not pass the `TradeID` of a trade
+identified by a `TradeUUID` string (see `50046`): it is Zorro's own number
+rather than the plugin's, so the result does not describe that trade.
 
 | Return | Meaning |
 |--------|---------|
@@ -247,7 +304,7 @@ a `var` holds exactly, so the value compares equal to the exchange's own.
 
 | Case | Why it has no ID |
 |------|------------------|
-| Trade ID is not tracked | Nothing to look up. Includes `0` and the `-1` Zorro uses for a `TradeUUID` trade |
+| Trade ID is not tracked | Nothing to look up. Includes `0` |
 | Order has not reached the exchange yet | The exchange assigns the ID on acknowledgement |
 | Position was adopted, not opened by this session | Resumed and imported positions are tracked without an originating order |
 

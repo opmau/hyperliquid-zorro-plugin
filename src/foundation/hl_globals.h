@@ -125,8 +125,19 @@ struct TradingState {
     mutable CRITICAL_SECTION tradeCs;
     bool tradeCsInit = false;
 
+    // Account the tradeMap belongs to ("<wallet>@<network>"); see beginSession.
+    char sessionOwner[128] = {0};
+    // BrokerBuy2 hands Zorro a UUID instead of an int trade ID (brokerCommand
+    // 50046). Same lifetime as the tradeMap: kept across a same-account re-login.
+    bool uuidTrades = false;
+
     void init();
     void cleanup();
+
+    // Start a broker session for `owner`. Zorro keeps its trade IDs across a
+    // logout/login, so a re-login on the same account keeps the tradeMap and
+    // the ID counter (returns true). A different account starts empty (false).
+    bool beginSession(const char* owner);
 
     // Thread-safe trade map access
     int generateTradeId();
