@@ -213,9 +213,19 @@ CloidQueryResult queryOrderByCloid(const char* cloid) {
             }
         }
 
-        if (strcmp(orderStatus, "filled") == 0) {
-            result.filledSize = json::getDouble(orderNode, "sz");
-            result.avgPrice = json::getDouble(orderNode, "avgPx");
+        // In this response "sz" is the size still REMAINING (a filled order
+        // reports "0.0") and "origSz" the size placed, so the filled size is
+        // their difference. That holds for every status - an open or canceled
+        // order can be partly filled. The response carries no average fill
+        // price, so avgPrice stays 0 and callers keep whatever price they had.
+        if (orderNode) {
+            double origSz = json::getDouble(orderNode, "origSz");
+            double remaining = json::getDouble(orderNode, "sz");
+            if (origSz > 0) {
+                result.origSize = origSz;
+                double filled = origSz - remaining;
+                result.filledSize = (filled > 0) ? filled : 0;
+            }
         }
 
         char msg[256];
