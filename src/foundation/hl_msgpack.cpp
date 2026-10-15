@@ -484,6 +484,37 @@ ByteArray packScheduleCancelAction(uint64_t time) {
     return packer.data();
 }
 
+// --- Leverage and isolated margin [OPM-1584] ---
+// Field order matches the Python SDK's update_leverage / update_isolated_margin.
+
+ByteArray packUpdateLeverageAction(int asset, bool isCross, int leverage) {
+    Packer packer;
+    packer.packMapHeader(4);
+    packer.packString("type");
+    packer.packString("updateLeverage");
+    packer.packString("asset");
+    packer.packInt(asset);
+    packer.packString("isCross");
+    packer.packBool(isCross);
+    packer.packString("leverage");
+    packer.packInt(leverage);
+    return packer.data();
+}
+
+ByteArray packUpdateIsolatedMarginAction(int asset, bool isBuy, int64_t ntli) {
+    Packer packer;
+    packer.packMapHeader(4);
+    packer.packString("type");
+    packer.packString("updateIsolatedMargin");
+    packer.packString("asset");
+    packer.packInt(asset);
+    packer.packString("isBuy");
+    packer.packBool(isBuy);
+    packer.packString("ntli");
+    packer.packInt(ntli);
+    return packer.data();
+}
+
 // --- Bracket (grouped) order encoding [OPM-79] ---
 
 ByteArray packBracketOrderAction(

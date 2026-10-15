@@ -135,6 +135,9 @@ if (!id) {
 | 50043 | `HL_PLACE_BRACKET` | `BracketRequest*` | Entry trade ID |
 | 50044 | `HL_MODIFY_BY_TRADEID` | `double[3]` | See below |
 | 50045 | `HL_GET_ORDER_OID` | `TradeID` | Exchange order ID, or `0` |
+| 50047 | `HL_SET_LEVERAGE` | `var[2]` {leverage, cross} | `1` accepted, `0` refused — see below |
+| 50048 | `HL_ADJUST_ISOLATED_MARGIN` | `var[1]` {USD} | `1` accepted, `0` refused — see below |
+| 50049 | `HL_GET_MARGIN_MODE` | none | `0`–`3` — see below |
 
 **`50040`, `50042` and `50043` are not callable from Lite-C.** Their request
 structs contain `std::string` members, so they are reachable only from C++.
@@ -259,6 +262,72 @@ detectable by the caller.
 `0` is also what a plugin build predating this command returns, because
 unrecognised codes in this range fall through without touching the caller — so a
 strategy written against this contract runs unmodified against either.
+
+#### `50047`–`50049` — leverage and isolated margin
+
+On Hyperliquid, leverage is an account setting per asset, not an order field.
+An order placed without setting it opens at whatever leverage and margin type
+the account last used for that asset — which, for an asset never traded on the
+address, is the exchange's default rather than anything the strategy chose.
+An isolated position's margin is then fixed at entry: as the position moves
+against it, nothing tops the margin up, and the position is liquidated once
+that margin is spent, regardless of free collateral elsewhere in the account.
+
+All three commands act on the asset selected by `SET_SYMBOL`.
+
+```c
+brokerCommand(SET_SYMBOL, "TSLA-USDC_xyz");
+
+if(brokerCommand(50049, 0) == 0) ...    // asset not in meta: stop
+
+var lev[2];
+lev[0] = 3;                             // leverage, 1..the asset's max
+lev[1] = 0;                             // 0 isolated, 1 cross
+if(!brokerCommand(50047, lev)) ...      // read 50023 for the reason
+
+// later, with the position open:
+var usd[1];
+usd[0] = 250;                           // add $250; negative removes
+if(!brokerCommand(50048, usd)) ...
+```
+
+Set leverage **before** the entry order: the margin an isolated position
+starts with follows from the leverage in force when it opens. Whether a change
+is accepted with a position already open is for the exchange to decide, and a
+refusal is reported like any other.
+
+`50047` and `50048` return `1` when the exchange accepted the action and `0`
+otherwise. On `0`, `HL_GET_LAST_ORDER_ERROR` (`50023`) holds the reason —
+either the exchange's own message or one of these local refusals, which are
+made before anything is signed:
+
+| Command | Refused locally when |
+|---------|----------------------|
+| `50047` | No symbol selected, the asset is not in meta or is spot, leverage is outside `1`..the asset's maximum, or cross is requested on an asset that only allows isolated |
+| `50048` | No symbol selected, the asset is not in meta or is spot, the amount rounds to zero at $0.000001, the asset is strict-isolated and the amount is negative, there is no open position, or the position is cross margin |
+
+`50048` reads the position from the exchange before sending, rather than from
+the plugin's cache, because the cache does not carry the margin type. That
+costs one extra request; margin changes are rare enough for that not to
+matter.
+
+A `0` caused by an HTTP failure is **not** retried. The action is signed and
+nonced, so it may have reached the exchange even though no reply came back.
+Re-read the position before sending it again.
+
+`50049` reads the asset's margin mode from exchange metadata loaded at login:
+
+| Return | Mode | Cross margin | Isolated margin removable |
+|--------|------|--------------|---------------------------|
+| `0` | Unknown | — | — |
+| `1` | Cross allowed | yes | yes |
+| `2` | Isolated only (`noCross`) | no | yes |
+| `3` | Strict isolated (`strictIsolated`) | no | no |
+
+`0` means the asset is not in meta, is spot, or reports a mode this build does
+not recognise. A mode is never guessed: an asset that reports only the older
+`onlyIsolated` flag, without a mode, is treated as `3`, the stricter of the two
+it could be.
 
 ### Export
 

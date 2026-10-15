@@ -143,6 +143,15 @@ ByteArray packTwapCancelAction(int asset, uint64_t twapId);
 /// @param time  Cancel time in UTC milliseconds (0 = clear/unschedule)
 ByteArray packScheduleCancelAction(uint64_t time);
 
+/// Pack an updateLeverage action for signing. [OPM-1584]
+/// Field order: {"type":"updateLeverage","asset","isCross","leverage"}
+ByteArray packUpdateLeverageAction(int asset, bool isCross, int leverage);
+
+/// Pack an updateIsolatedMargin action for signing. [OPM-1584]
+/// Field order: {"type":"updateIsolatedMargin","asset","isBuy","ntli"}
+/// @param ntli  USD x 1e6, signed: positive adds margin, negative removes it
+ByteArray packUpdateIsolatedMarginAction(int asset, bool isBuy, int64_t ntli);
+
 /// Describes one order in a bracket group (entry, TP, or SL) [OPM-79]
 struct BracketOrderWire {
     int asset;

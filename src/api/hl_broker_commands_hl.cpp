@@ -18,12 +18,14 @@
 //   50040-50041  TWAP place / cancel
 //   50042-50044  Modify (struct), bracket, modify-by-tradeID  [OPM-793]
 //   50045        Exchange order ID for a trade ID         [OPM-1085]
+//   50047-50049  Leverage, isolated margin, margin mode   [OPM-1584]
 //=============================================================================
 
 #include "hl_broker_internal.h"
 #include "../services/hl_trading_twap.h"
 #include "../services/hl_trading_modify.h"
 #include "../services/hl_trading_bracket.h"
+#include "../services/hl_trading_margin.h"
 
 double handleHyperliquidCommand(int mode, intptr_t parameter) {
     switch (mode) {
@@ -477,6 +479,34 @@ double handleHyperliquidCommand(int mode, intptr_t parameter) {
         }
         return (double)res.entryTradeId;
     }
+
+    //=========================================================================
+    // LEVERAGE AND ISOLATED MARGIN (50047-50049) [OPM-1584]
+    //=========================================================================
+    // All three act on the asset selected by SET_SYMBOL. Rejections, local or
+    // from the exchange, are readable via HL_GET_LAST_ORDER_ERROR (50023).
+
+    case HL_SET_LEVERAGE: {
+        //   var p[2]; p[0] = 3; p[1] = 0;   // 3x isolated (p[1] = 1: cross)
+        //   brokerCommand(SET_SYMBOL, "TSLA-USDC_xyz");
+        //   if(!brokerCommand(50047, p)) ...
+        if (parameter == 0) return 0;
+        const double* p = (const double*)parameter;
+        return hl::trading::updateLeverage(hl::g_trading.currentSymbol,
+                                           (int)p[0], p[1] != 0) ? 1 : 0;
+    }
+
+    case HL_ADJUST_ISOLATED_MARGIN: {
+        //   var p[1]; p[0] = 250;           // add $250 (negative removes)
+        //   if(!brokerCommand(50048, p)) ...
+        if (parameter == 0) return 0;
+        const double* p = (const double*)parameter;
+        return hl::trading::adjustIsolatedMargin(hl::g_trading.currentSymbol,
+                                                 p[0]) ? 1 : 0;
+    }
+
+    case HL_GET_MARGIN_MODE:
+        return hl::trading::getMarginMode(hl::g_trading.currentSymbol);
 
 
     default:
