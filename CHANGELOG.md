@@ -11,6 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Set leverage and isolated margin per asset (`50047`–`50049`).** Leverage on
+  Hyperliquid is an account setting per asset, not an order field, so a
+  strategy previously could not choose it: every entry opened at whatever the
+  account last used for that asset. An isolated position's margin is fixed at
+  entry and was impossible to top up from a strategy, so a position that moved
+  against it was liquidated once that margin ran out, whatever collateral the
+  account held elsewhere.
+
+  `brokerCommand(50047, {leverage, cross})` sets leverage and margin type for
+  the `SET_SYMBOL` asset; `brokerCommand(50048, {usd})` adds margin to (or,
+  with a negative amount, removes it from) the open isolated position;
+  `brokerCommand(50049)` reports whether the asset allows cross margin and
+  whether isolated margin can be removed. Requests the exchange would reject
+  are refused before signing, with the reason readable via `50023`. See
+  `docs/BROKERCOMMAND_REFERENCE.md` [OPM-1584].
+
 ## [2.3.0] — 2026-08-20
 
 Adds a way to match a Zorro trade against the order the exchange reports for
