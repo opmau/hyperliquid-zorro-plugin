@@ -166,6 +166,17 @@ double handleHyperliquidCommand(int mode, intptr_t parameter) {
         return hl::utils::exchangeOrderIdToDouble(state.orderId);
     }
 
+    case HL_SET_UUID_TRADES: {
+        // [OPM-1552] brokerCommand(50046, 1) before the first trade: Zorro then
+        // identifies each new trade by a string it stores with the trade
+        // (GET_UUID/SET_UUID), so the plugin can still close it after Zorro is
+        // restarted. Trades opened before the switch keep their int ID.
+        hl::g_trading.uuidTrades = (parameter != 0);
+        hl::g_logger.logf(1, "UUID trade identifiers %s",
+                          hl::g_trading.uuidTrades ? "on" : "off");
+        return hl::g_trading.uuidTrades ? 1 : 0;
+    }
+
     case HL_SET_ACCOUNT_MODE: {
         int mode = (int)parameter;
         if (mode < 0 || mode > 1) return 0;

@@ -27,6 +27,15 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
                         double* pRoll, double* pProfit) {
     if (!hl::g_config.walletAddress[0]) return 0;
 
+    // [OPM-1552] UUID trade: Zorro sent the identifier with SET_UUID first. A
+    // trade this session does not track reports NAY - Zorro then keeps it open
+    // on its own record - until a close rebuilds it from the exchange.
+    if (tradeId == -1) {
+        int id = uuidResolvePending();
+        if (!id) return NAY;
+        return BrokerTrade(id, pOpen, pClose, pRoll, pProfit);
+    }
+
     if (hl::g_config.diagLevel >= 2) {
         char msg[64];
         sprintf_s(msg, "BrokerTrade: TradeID=%d", tradeId);
@@ -40,6 +49,11 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
             hl::g_logger.log(2, "BrokerTrade: Trade not found - returning NAY");
         return NAY;
     }
+
+    // [OPM-1552] A trade rebuilt from a UUID has no record of how much Zorro
+    // closed before it was rebuilt, so any open amount reported here could
+    // overwrite Zorro's correct one.
+    if (state.uuidAdopted) return NAY;
 
     // --- PENDING_ reconciliation [OPM-89] ---
     // Orders with synthetic "PENDING_<cloid>" orderId need exchange query to
@@ -57,10 +71,13 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
                 if (strcmp(qr.status, "filled") == 0) {
                     updated.status = hl::determineFilledStatus(qr.filledSize, state.requestedSize);
                     updated.filledSize = qr.filledSize;
-                    updated.avgPrice = qr.avgPrice;
+                    // orderStatus carries no average fill price; keep ours.
+                    if (qr.avgPrice > 0) updated.avgPrice = qr.avgPrice;
                 } else if (strcmp(qr.status, "canceled") == 0 ||
                            strcmp(qr.status, "siblingFilledCanceled") == 0) {  // [OPM-79]
                     updated.status = hl::OrderStatus::Cancelled;
+                    // [OPM-798] A cancel can follow a partial fill.
+                    if (qr.filledSize > updated.filledSize) updated.filledSize = qr.filledSize;
                 } else {
                     updated.status = hl::OrderStatus::Open;
                 }
@@ -234,9 +251,11 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
             if (qr.outcome == hl::QueryOutcome::Found) {
                 if (strcmp(qr.status, "filled") == 0 && qr.filledSize > 0) {
                     hl::OrderStatus newSt = hl::determineFilledStatus(qr.filledSize, state.requestedSize);
-                    hl::trading::updateOrder(tradeId, qr.filledSize, qr.avgPrice, newSt);
+                    // orderStatus carries no average fill price; keep ours.
+                    double avgPx = (qr.avgPrice > 0) ? qr.avgPrice : state.avgPrice;
+                    hl::trading::updateOrder(tradeId, qr.filledSize, avgPx, newSt);
                     state.filledSize = qr.filledSize;
-                    state.avgPrice = qr.avgPrice;
+                    state.avgPrice = avgPx;
                     state.status = newSt;
                     if (qr.oid[0]) strncpy_s(state.orderId, qr.oid, _TRUNCATE);
                     hl::g_logger.logf(1, "BrokerTrade: HTTP fallback found fill for %d", tradeId);
@@ -247,6 +266,7 @@ DLLFUNC int BrokerTrade(int tradeId, double* pOpen, double* pClose,
                     // before the cancel — the exchange still holds them, and a
                     // reprice loop (cancel/replace with partials in flight)
                     // hits this on every iteration.
+                    if (qr.filledSize > state.filledSize) state.filledSize = qr.filledSize;
                     hl::trading::updateOrder(tradeId, state.filledSize, state.avgPrice,
                                              hl::OrderStatus::Cancelled);
                     state.status = hl::OrderStatus::Cancelled;
