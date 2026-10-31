@@ -16,6 +16,7 @@
 //   CR-7 (OPM-797) Synthetic order IDs never produce a cancel for oid 0
 //   CR-8 (OPM-798) Cancelled-with-partial reports the partial, not NAY-1
 //   CR-9           Modify TIF must satisfy the always_place=false rule
+//   Market orders  A missing or non-finite price yields a limit of 0
 //
 // Sibling: test_alo_ordertype.cpp covers CR-1, CR-4 and CR-5 (sticky ALO
 // order type, market TIF forcing + casing, exchange error surfacing).
@@ -375,6 +376,34 @@ TEST_CASE(cr9_modify_validity_agrees_with_canonical_tif) {
 }
 
 //=============================================================================
+// Market order limit price  [real implementation]
+//=============================================================================
+// A market order goes out as an IOC limit priced through the touch. When the
+// price lookup fails the touch is 0, and the order must not be sent at all:
+// a limit of 0 is not a market order.
+
+TEST_CASE(mkt_buy_limit_sits_above_the_ask) {
+    ASSERT_FLOAT_EQ(marketOrderLimit(100.0, true, 0.05), 105.0);
+}
+
+TEST_CASE(mkt_sell_limit_sits_below_the_bid) {
+    ASSERT_FLOAT_EQ(marketOrderLimit(100.0, false, 0.05), 95.0);
+}
+
+TEST_CASE(mkt_missing_price_yields_no_limit) {
+    const double bad[] = {0.0, -1.0, NAN, INFINITY, -INFINITY};
+    for (int i = 0; i < 5; ++i) {
+        ASSERT_FLOAT_EQ(marketOrderLimit(bad[i], true, 0.05), 0.0);
+        ASSERT_FLOAT_EQ(marketOrderLimit(bad[i], false, 0.05), 0.0);
+    }
+}
+
+TEST_CASE(mkt_sell_limit_never_goes_non_positive) {
+    ASSERT_FLOAT_EQ(marketOrderLimit(100.0, false, 1.0), 0.0);
+    ASSERT_FLOAT_EQ(marketOrderLimit(100.0, false, 1.5), 0.0);
+}
+
+//=============================================================================
 // MAIN
 //=============================================================================
 
@@ -420,6 +449,12 @@ int main() {
     RUN_TEST(cr9_gtc_is_valid_for_modify);
     RUN_TEST(cr9_invalid_tif_is_rejected_for_modify);
     RUN_TEST(cr9_modify_validity_agrees_with_canonical_tif);
+
+    printf("\n--- Market order limit price ---\n");
+    RUN_TEST(mkt_buy_limit_sits_above_the_ask);
+    RUN_TEST(mkt_sell_limit_sits_below_the_bid);
+    RUN_TEST(mkt_missing_price_yields_no_limit);
+    RUN_TEST(mkt_sell_limit_never_goes_non_positive);
 
     return printTestSummary();
 }

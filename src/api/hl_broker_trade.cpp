@@ -160,7 +160,11 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
             hl::PriceData price = hl::market::getPrice(coinForApi.c_str());
             double basePrice = (volume > 0) ? price.ask : price.bid;
 
-            if (basePrice <= 0) {
+            // Apply slippage buffer so IOC fills even if price moves slightly
+            double slippage = hl::config::MARKET_ORDER_SLIPPAGE;
+            request.limitPrice = hl::utils::marketOrderLimit(basePrice, volume > 0, slippage);
+
+            if (request.limitPrice <= 0) {
                 // [OPM-227] Close with no price: check if position is already flat
                 if (isCloseOrder) {
                     hl::account::PositionInfo pos = hl::account::getPosition(coinForApi.c_str());
@@ -177,12 +181,6 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
                 hl::g_logger.log(1, "BrokerBuy2: No price available");
                 return 0;
             }
-
-            // Apply slippage buffer so IOC fills even if price moves slightly
-            double slippage = hl::config::MARKET_ORDER_SLIPPAGE;
-            request.limitPrice = (volume > 0)
-                ? basePrice * (1.0 + slippage)   // Buy: above ask
-                : basePrice * (1.0 - slippage);  // Sell: below bid
             request.orderType = hl::OrderType::Ioc;
 
             hl::g_logger.logf(1, "BrokerBuy2: Market order - IOC @ %.2f (base %.2f, slippage %.0f%%)",
@@ -375,21 +373,23 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
         request.orderType = hl::OrderType::Ioc;
     }
 
-    // If no limit price, this is a market close: use IOC + slippage buffer
+    // If no limit price, this is a market close: use IOC + slippage buffer.
+    // Without a price there is no limit to send, so report the close as failed;
+    // Zorro repeats a failed close at increasing intervals.
     if (request.limitPrice <= 0) {
         hl::PriceData price = hl::market::getPrice(state.coin);
         double basePrice = closingBuy ? price.ask : price.bid;
+        double slippage = hl::config::MARKET_ORDER_SLIPPAGE;
+        request.limitPrice = hl::utils::marketOrderLimit(basePrice, closingBuy, slippage);
 
-        if (basePrice > 0) {
-            double slippage = hl::config::MARKET_ORDER_SLIPPAGE;
-            request.limitPrice = closingBuy
-                ? basePrice * (1.0 + slippage)   // Closing buy: above ask
-                : basePrice * (1.0 - slippage);  // Closing sell: below bid
-            request.orderType = hl::OrderType::Ioc;
-
-            hl::g_logger.logf(1, "BrokerSell2: Market close - IOC @ %.2f (base %.2f, slippage %.0f%%)",
-                              request.limitPrice, basePrice, slippage * 100);
+        if (request.limitPrice <= 0) {
+            hl::g_logger.logf(1, "BrokerSell2: No price for %s - close not sent", state.coin);
+            return 0;
         }
+        request.orderType = hl::OrderType::Ioc;
+
+        hl::g_logger.logf(1, "BrokerSell2: Market close - IOC @ %.2f (base %.2f, slippage %.0f%%)",
+                          request.limitPrice, basePrice, slippage * 100);
     }
 
     // [OPM-792] Place under an explicit internal tradeId so the resting close

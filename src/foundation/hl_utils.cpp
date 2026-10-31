@@ -224,6 +224,13 @@ double roundToTickSize(double price, double tickSize) {
     return round(price / tickSize) * tickSize;
 }
 
+double marketOrderLimit(double touchPrice, bool isBuy, double slippage) {
+    if (!isfinite(touchPrice) || touchPrice <= 0) return 0.0;
+    double limit = isBuy ? touchPrice * (1.0 + slippage)
+                         : touchPrice * (1.0 - slippage);
+    return (isfinite(limit) && limit > 0) ? limit : 0.0;
+}
+
 double roundPriceForExchange(double price, int szDecimals, int maxDecimals,
                              PriceRound mode) {
     if (price == 0.0) return 0.0;
