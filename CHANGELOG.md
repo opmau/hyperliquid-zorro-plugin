@@ -36,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   size still resting, which also reports partial fills on open and cancelled
   orders, and the lookup no longer resets the trade's fill price to 0
   [OPM-1552].
+- **A market close is not sent when no price is available.** Earlier versions
+  sent the reduce-only close with a limit price of 0 in place of the
+  slippage-bounded limit. `BrokerSell2` now sends no order, returns 0 and logs
+  `BrokerSell2: No price for <coin> - close not sent` (at `SET_DIAGNOSTICS` 1
+  or higher); Zorro repeats a failed close at increasing intervals.
 
 ## [2.3.0] — 2026-08-20
 

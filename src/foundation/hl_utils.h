@@ -117,6 +117,12 @@ double roundToDecimals(double value, int decimals);
 // Round price to tick size (e.g., 50001.23 with tick=0.1 -> 50001.2)
 double roundToTickSize(double price, double tickSize);
 
+// Limit price for the IOC that stands in for a market order: the touch price
+// moved through the book by the fraction `slippage` (0.05 = 5%; buys above the
+// ask, sells below the bid). Returns 0 when touchPrice, or the result, is not a
+// positive finite number, so a failed price lookup never yields a limit.
+double marketOrderLimit(double touchPrice, bool isBuy, double slippage);
+
 // Rounding direction for exchange price snapping. [OPM-796]
 // Passive (maker) orders must never be rounded ACROSS the spread, or the
 // exchange rejects them as post-only-would-match. Buy limits round Down,
