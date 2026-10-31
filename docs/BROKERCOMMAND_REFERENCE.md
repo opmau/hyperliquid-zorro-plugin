@@ -328,6 +328,8 @@ strategy written against this contract runs unmodified against either.
 | 50004 | `HL_SET_EXPORT_NFA` | `0`…`15` | `1`, or `0` if out of range |
 
 `50003` writes a single-row `Accounts.csv` template from the current connection.
+Its `Pass` column is always `0`, so the key is entered manually at login. For an
+unattended login, paste your own key into `Pass`.
 
 Its `NFA` column is Zorro's account-compliance bitfield — `1` no partial
 closing, `2` no hedging, `4` FIFO, `8` no closing of trades, `14`/`15` full NFA
