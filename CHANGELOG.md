@@ -22,6 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   opening order on the exchange. With it on, `50044` and `50045` cannot address
   the new trades. Off by default. See `docs/BROKERCOMMAND_REFERENCE.md`
   [OPM-1552].
+- **At `SET_DIAGNOSTICS` 1 or higher, the log reports where price lookups were
+  answered from, at most once a minute.** The line reads
+  `price source: ws=N wait=N stale=N http=N failed=N none=N (fallback N%)`.
+  `ws` and `wait` count lookups answered from the price cache, which holds
+  live-feed quotes and the most recent HTTP quote. `stale`, `http`, `failed`
+  and `none` count lookups the cache could not answer with a current quote;
+  `failed` and `none` returned no price at all. `fallback` is the share of
+  those four in all lookups since the previous line. The first line appears
+  about a minute after the first price lookup, and none is written while no
+  prices are requested. Earlier versions reported stale quotes and HTTP
+  fallbacks only at `SET_DIAGNOSTICS` 2.
 
 ### Fixed
 
