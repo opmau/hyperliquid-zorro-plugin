@@ -37,6 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   orders, and the lookup no longer resets the trade's fill price to 0
   [OPM-1552].
 
+### Security
+
+- **`brokerCommand(50003)` writes `0` in the `Pass` column of the
+  `Accounts.csv` template.** Templates written by versions 2.0.0 to 2.3.0
+  contain the signing key in plain text: delete them, and if one has been
+  shared or copied off the machine, treat the key as exposed and replace it.
+  With `0`, the key is entered manually at login; for an unattended login,
+  paste your own key into `Pass`.
+
 ## [2.3.0] — 2026-08-20
 
 Adds a way to match a Zorro trade against the order the exchange reports for

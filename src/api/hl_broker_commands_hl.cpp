@@ -418,13 +418,17 @@ double handleHyperliquidCommand(int mode, intptr_t parameter) {
         // NFA column comes from the caller, never from the plugin: it is the
         // user's compliance setting, made in Accounts.csv or via
         // set(NFA)/Hedge, and defaults to neutral. [OPM-801]
+        //
+        // Pass is always 0, so the key is entered manually at login. The
+        // template is a plain-text file that gets copied and shared, so it
+        // must never carry the signing key; users who want an unattended
+        // login paste their own key into Accounts.csv.
         fprintf(f, "Name,Server,AccountId,User,Pass,Assets,CCY,Real,NFA,Plugin\n");
-        fprintf(f, "%s,%s,%s,%s,%s,AssetsHyperliquid,USD,%d,%d,%s\n",
+        fprintf(f, "%s,%s,%s,%s,0,AssetsHyperliquid,USD,%d,%d,%s\n",
                 PLUGIN_NAME,
                 hl::g_config.baseUrl[0] ? hl::g_config.baseUrl : "https://api.hyperliquid.xyz",
                 hl::g_config.walletAddress[0] ? hl::g_config.walletAddress : "0",
                 hl::g_config.walletAddress[0] ? hl::g_config.walletAddress : "0",
-                hl::g_config.privateKey[0] ? hl::g_config.privateKey : "0",
                 hl::g_config.isTestnet ? 0 : 1,
                 hl::g_config.exportNfa,
                 dllName);
