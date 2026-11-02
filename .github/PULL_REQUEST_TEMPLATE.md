@@ -1,5 +1,5 @@
 <!--
-Thanks for contributing! Open PRs against the `develop` branch.
+Thanks for contributing! Open PRs against the `main` branch.
 Do not include secrets (private keys, account addresses) in code, tests, or logs.
 -->
 
@@ -21,7 +21,7 @@ Describe what you tested and the result.
 
 ## Checklist
 
-- [ ] Targets the `develop` branch
+- [ ] Targets the `main` branch
 - [ ] Respects the layered architecture (Foundation → Transport → Services → API)
 - [ ] Updated `CHANGELOG.md` under `[Unreleased]` (if user-facing)
 - [ ] No secrets, credentials, or personal paths committed
