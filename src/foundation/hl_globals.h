@@ -108,8 +108,16 @@ struct TradingState {
     // Current asset context (set by SET_SYMBOL or BrokerAsset, used by GET_POSITION etc.)
     char currentSymbol[64] = {0};
 
-    // Price lookup symbol (set ONLY by SET_SYMBOL, used by GET_PRICE)
-    // Isolates GET_PRICE from BrokerAsset subscription loops that overwrite currentSymbol.
+    // Price lookup symbol, read by GET_PRICE.
+    // Written by BOTH writers of currentSymbol - SET_SYMBOL (hl_broker_commands.cpp)
+    // and BrokerAsset (hl_broker_market.cpp) - and always with the same value, so
+    // today this is a byte-for-byte duplicate of currentSymbol and isolates GET_PRICE
+    // from NOTHING: a subscription loop leaves it on the last asset polled. An earlier
+    // comment here claimed SET_SYMBOL was the only writer; it never was. The field is
+    // kept separate because GET_PRICE reads it, so removing the BrokerAsset write
+    // would make the isolation real without touching GET_PRICE. Until that decision
+    // is taken, a strategy MUST call SET_SYMBOL immediately before every GET_PRICE.
+    // [OPM-1132]
     char priceSymbol[64] = {0};
 
     // Trade tracking: Zorro trade ID -> OrderState
@@ -117,8 +125,19 @@ struct TradingState {
     mutable CRITICAL_SECTION tradeCs;
     bool tradeCsInit = false;
 
+    // Account the tradeMap belongs to ("<wallet>@<network>"); see beginSession.
+    char sessionOwner[128] = {0};
+    // BrokerBuy2 hands Zorro a UUID instead of an int trade ID (brokerCommand
+    // 50046). Same lifetime as the tradeMap: kept across a same-account re-login.
+    bool uuidTrades = false;
+
     void init();
     void cleanup();
+
+    // Start a broker session for `owner`. Zorro keeps its trade IDs across a
+    // logout/login, so a re-login on the same account keeps the tradeMap and
+    // the ID counter (returns true). A different account starts empty (false).
+    bool beginSession(const char* owner);
 
     // Thread-safe trade map access
     int generateTradeId();

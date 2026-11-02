@@ -82,6 +82,9 @@ struct OrderState {
                                 // placed by BrokerSell2, while it is still
                                 // resting. DO_CANCEL on this trade cancels that
                                 // order rather than the (filled) entry order.
+    bool uuidAdopted = false;   // [OPM-1552] Rebuilt from a Zorro UUID: the
+                                // plugin cannot know how much Zorro already
+                                // closed, so BrokerTrade reports NAY for it.
 };
 
 // === Position Data ===
@@ -129,6 +132,7 @@ struct CloidQueryResult {
     char oid[64] = {0};         // Exchange order ID (if found)
     char status[32] = {0};     // "filled", "open", "canceled", "unknownOid", etc.
     double filledSize = 0.0;
+    double origSize = 0.0;      // Size the order was placed with (0 if unknown)
     double avgPrice = 0.0;
     QueryOutcome outcome = QueryOutcome::Failed;
 };

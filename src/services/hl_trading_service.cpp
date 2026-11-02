@@ -37,7 +37,6 @@ namespace trading {
 static FillCallback s_fillCallback = nullptr;
 static char s_orderType[16] = "Ioc";
 static bool s_dryRun = false;
-static bool s_initialized = false;
 
 // =============================================================================
 // LOGGING HELPER
@@ -55,19 +54,14 @@ static void logMsg(int level, const char* prefix, const char* msg) {
 // INITIALIZATION
 // =============================================================================
 
-void init() {
-    if (!s_initialized) {
-        g_trading.init();
-        s_initialized = true;
-    }
+bool beginSession(const char* owner) {
+    return g_trading.beginSession(owner);
 }
 
-void cleanup() {
-    if (s_initialized) {
-        g_trading.cleanup();
-        s_initialized = false;
-        s_fillCallback = nullptr;
-    }
+void endSession() {
+    // The tradeMap outlives the session on purpose: Zorro keeps its trade IDs
+    // across a logout/login, and beginSession decides whether they still apply.
+    s_fillCallback = nullptr;
 }
 
 // =============================================================================

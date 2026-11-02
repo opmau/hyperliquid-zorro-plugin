@@ -53,6 +53,7 @@
 #include "../foundation/hl_config.h"
 #include "../foundation/hl_crypto.h"
 #include "../foundation/hl_utils.h"
+#include "../foundation/hl_trade_uuid.h"
 #include "../services/hl_market_service.h"
 #include "../services/hl_trading_service.h"
 #include "../services/hl_trading_response.h"
@@ -103,6 +104,8 @@ void formatBuildStamp(char* buf, size_t bufSize);
                                       // {tradeId, newPrice, newSize} [OPM-793]
 #define HL_GET_ORDER_OID       50045  // Exchange order ID for a trade ID:
                                       // param=tradeId, returns oid [OPM-1085]
+#define HL_SET_UUID_TRADES     50046  // 1 = identify new trades by UUID, 0 = by
+                                      // int trade ID (default) [OPM-1552]
 
 // Zorro runtime function pointer (defined in hl_broker.cpp, used by BrokerAccount)
 extern "C" { extern int (*nap)(int); }
@@ -132,3 +135,16 @@ double handleHyperliquidCommand(int mode, intptr_t parameter);
 bool hasOtherSameSideTracker(int excludeTradeId, const char* coin,
                              hl::OrderSide side);
 void recordZorroClose(int tradeId, hl::OrderState& state, double closeSz);
+
+// Zorro UUID trade identifiers [OPM-1552] (defined in hl_broker_uuid.cpp).
+// BrokerBuy2 records the UUID of the trade it just opened; Zorro reads it with
+// GET_UUID. Before acting on a UUID trade Zorro sends SET_UUID, then calls the
+// function with trade ID -1; these helpers turn that pending UUID back into a
+// tracked trade ID. All return 0 when there is nothing to act on.
+bool uuidRecordOpened(const char* coin, hl::OrderSide side, const char* cloid);
+bool uuidGet(char* out);                 // GET_UUID: out holds UUIDSIZE chars
+void uuidSet(const char* uuid);          // SET_UUID
+int  uuidTradeForClose();                // BrokerSell2(-1): tracked or adopted ID
+int  uuidResolvePending();               // BrokerTrade(-1): tracked ID only
+int  uuidCancelPending();                // DO_CANCEL(-1): 1 on success
+void uuidResetSession();                 // login/logout

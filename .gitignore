@@ -115,6 +115,9 @@ Notepad++/
 # Legacy code (archived locally)
 legacy/
 
+# Host diagnostics collected from the trading machine
+VPS/
+
 # Sprint/project management docs (local only, synced from Linear)
 docs/CURRENT_SPRINT.md
 docs/PREVIOUS_SPRINT.md

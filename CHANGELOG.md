@@ -11,6 +11,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`brokerCommand(50046, 1)` identifies trades by a string Zorro stores with
+  the trade.** An int trade ID only means something to the plugin process that
+  issued it, so closing a trade that a new Zorro process resumes from its `.trd`
+  file fails with "Trade not found". With UUID identifiers on, `BrokerBuy2`
+  returns `-1` and Zorro reads the identifier with `GET_UUID`; the plugin can
+  then close the trade even when it no longer tracks it, by looking up the
+  opening order on the exchange. With it on, `50044` and `50045` cannot address
+  the new trades. Off by default. See `docs/BROKERCOMMAND_REFERENCE.md`
+  [OPM-1552].
+
+### Fixed
+
+- **A logout and login on the same account keeps the trades the plugin
+  tracks.** Zorro keeps its trade IDs across a re-login, but the plugin started
+  empty, so every later close of an open trade failed with "Trade not found".
+  Tracked trades now survive a re-login when the wallet and network are
+  unchanged; a login to a different wallet or network starts empty and turns
+  `50046` off [OPM-1552].
+- **Fill polls that fall back to an exchange lookup by client order ID read a
+  filled order's size as 0.** The filled size is now the original size minus the
+  size still resting, which also reports partial fills on open and cancelled
+  orders, and the lookup no longer resets the trade's fill price to 0
+  [OPM-1552].
+- **A market close is not sent when no price is available.** Earlier versions
+  sent the reduce-only close with a limit price of 0 in place of the
+  slippage-bounded limit. `BrokerSell2` now sends no order, returns 0 and logs
+  `BrokerSell2: No price for <coin> - close not sent` (at `SET_DIAGNOSTICS` 1
+  or higher); Zorro repeats a failed close at increasing intervals.
+
+### Security
+
+- **`brokerCommand(50003)` writes `0` in the `Pass` column of the
+  `Accounts.csv` template.** Templates written by versions 2.0.0 to 2.3.0
+  contain the signing key in plain text: delete them, and if one has been
+  shared or copied off the machine, treat the key as exposed and replace it.
+  With `0`, the key is entered manually at login; for an unattended login,
+  paste your own key into `Pass`.
+
 ## [2.3.0] — 2026-08-20
 
 Adds a way to match a Zorro trade against the order the exchange reports for

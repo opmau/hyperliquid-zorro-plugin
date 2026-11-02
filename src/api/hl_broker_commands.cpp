@@ -11,6 +11,7 @@
 // - GET_COMPLIANCE, GET_MAXREQUESTS, GET_MAXTICKS, GET_BROKERZONE
 // - SET_DIAGNOSTICS, SET_AMOUNT, SET_HWND, SET_ORDERTYPE, SET_SYMBOL
 // - GET_POSITION, GET_TRADES, GET_PRICE
+// - GET_UUID, SET_UUID (UUID trade identifiers, see hl_broker_uuid.cpp)
 // - DO_CANCEL
 //
 // The Hyperliquid-specific 500xx range lives in hl_broker_commands_hl.cpp and
@@ -172,9 +173,11 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
         // Parameter: 4=last(mid), 5=ask, 6=bid
         int priceType = (int)parameter;
 
-        // Use priceSymbol (set by SET_SYMBOL) — the ONLY reliable asset context.
-        // BrokerAsset subscription loops overwrite currentSymbol for every asset,
-        // so currentSymbol is NOT safe for GET_PRICE. [OPM-6]
+        // Read priceSymbol rather than currentSymbol — but the two are currently
+        // identical: SET_SYMBOL and BrokerAsset each write BOTH fields, so neither
+        // is isolated from the subscription loop and priceSymbol is not the "only
+        // reliable asset context" an earlier comment here claimed. The caller must
+        // SET_SYMBOL immediately before asking for a price. [OPM-6, OPM-1132]
         if (!hl::g_trading.priceSymbol[0]) {
             // Always log — this is a data loss event the strategy needs to see
             hl::g_logger.logf(1, "GET_PRICE(%d): priceSymbol empty (no SET_SYMBOL), "
@@ -392,8 +395,16 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
     // DO_CANCEL - Cancel order
     //=========================================================================
 
+    case GET_UUID:
+        return uuidGet((char*)parameter) ? 1 : 0;
+
+    case SET_UUID:
+        uuidSet((const char*)parameter);
+        return 1;
+
     case DO_CANCEL: {
         int tradeId = (int)parameter;
+        if (tradeId == -1) return uuidCancelPending();  // [OPM-1552] UUID trade
         if (tradeId == 0) {
             // [OPM-797] Cancel every resting order for the current SET_SYMBOL,
             // or account-wide when no symbol has been selected. Sourced from
