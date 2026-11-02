@@ -50,8 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A market close is not sent when no price is available.** Earlier versions
   sent the reduce-only close with a limit price of 0 in place of the
   slippage-bounded limit. `BrokerSell2` now sends no order, returns 0 and logs
-  `BrokerSell2: No price for <coin> - close not sent` (at `SET_DIAGNOSTICS` 1
-  or higher); Zorro repeats a failed close at increasing intervals.
+  `BrokerSell2: No price for <coin> - close not sent` at every
+  `SET_DIAGNOSTICS` level, including 0; Zorro repeats a failed close at
+  increasing intervals.
 
 ### Security
 

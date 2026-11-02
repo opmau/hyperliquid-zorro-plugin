@@ -383,7 +383,8 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
         request.limitPrice = hl::utils::marketOrderLimit(basePrice, closingBuy, slippage);
 
         if (request.limitPrice <= 0) {
-            hl::g_logger.logf(1, "BrokerSell2: No price for %s - close not sent", state.coin);
+            // Level 0: Zorro's Warning 075 ("Can't close") does not give the cause.
+            hl::g_logger.logf(0, "BrokerSell2: No price for %s - close not sent", state.coin);
             return 0;
         }
         request.orderType = hl::OrderType::Ioc;
