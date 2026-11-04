@@ -106,6 +106,12 @@ void formatBuildStamp(char* buf, size_t bufSize);
                                       // param=tradeId, returns oid [OPM-1085]
 #define HL_SET_UUID_TRADES     50046  // 1 = identify new trades by UUID, 0 = by
                                       // int trade ID (default) [OPM-1552]
+#define HL_SET_LEVERAGE        50047  // Leverage + margin type, SET_SYMBOL asset:
+                                      // param=double[2] {leverage, cross}
+#define HL_ADJUST_ISOLATED_MARGIN 50048  // Add/remove isolated margin, USD:
+                                         // param=double[1] {usd}
+#define HL_GET_MARGIN_MODE     50049  // 0 unknown, 1 cross allowed, 2 isolated
+                                      // only, 3 strict isolated
 
 // Zorro runtime function pointer (defined in hl_broker.cpp, used by BrokerAccount)
 extern "C" { extern int (*nap)(int); }
