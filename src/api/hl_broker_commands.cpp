@@ -11,6 +11,7 @@
 // - GET_COMPLIANCE, GET_MAXREQUESTS, GET_MAXTICKS, GET_BROKERZONE
 // - SET_DIAGNOSTICS, SET_AMOUNT, SET_HWND, SET_ORDERTYPE, SET_SYMBOL
 // - GET_POSITION, GET_TRADES, GET_PRICE
+// - GET_UUID, SET_UUID (UUID trade identifiers, see hl_broker_uuid.cpp)
 // - DO_CANCEL
 //
 // The Hyperliquid-specific 500xx range lives in hl_broker_commands_hl.cpp and
@@ -394,8 +395,16 @@ double handleBrokerCommand(int mode, intptr_t parameter) {
     // DO_CANCEL - Cancel order
     //=========================================================================
 
+    case GET_UUID:
+        return uuidGet((char*)parameter) ? 1 : 0;
+
+    case SET_UUID:
+        uuidSet((const char*)parameter);
+        return 1;
+
     case DO_CANCEL: {
         int tradeId = (int)parameter;
+        if (tradeId == -1) return uuidCancelPending();  // [OPM-1552] UUID trade
         if (tradeId == 0) {
             // [OPM-797] Cancel every resting order for the current SET_SYMBOL,
             // or account-wide when no symbol has been selected. Sourced from

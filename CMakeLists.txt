@@ -116,6 +116,7 @@ add_library(hl_api STATIC
     src/api/hl_broker_trade_query.cpp
     src/api/hl_broker_commands.cpp
     src/api/hl_broker_commands_hl.cpp
+    src/api/hl_broker_uuid.cpp
 )
 target_include_directories(hl_api PUBLIC
     ${CMAKE_SOURCE_DIR}/src/api
@@ -140,6 +141,7 @@ add_library(Hyperliquid SHARED
     src/api/hl_broker_trade_query.cpp
     src/api/hl_broker_commands.cpp
     src/api/hl_broker_commands_hl.cpp
+    src/api/hl_broker_uuid.cpp
 )
 target_include_directories(Hyperliquid PRIVATE
     ${CMAKE_SOURCE_DIR}/src/api

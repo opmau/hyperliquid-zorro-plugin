@@ -114,6 +114,33 @@ void TradingState::init() {
     httpRequestId = 0;
     lotSize = 1.0;
     tradeMap.clear();
+    sessionOwner[0] = 0;
+    uuidTrades = false;
+}
+
+bool TradingState::beginSession(const char* owner) {
+    if (!tradeCsInit) {
+        InitializeCriticalSection(&tradeCs);
+        tradeCsInit = true;
+    }
+    // Same account: Zorro still holds the trade IDs this map answers to, so
+    // keep the map, the ID counter and the UUID mode. Clearing them would
+    // leave Zorro holding IDs the plugin cannot resolve, and every close would
+    // fail with "Trade not found".
+    if (owner && owner[0] && _stricmp(owner, sessionOwner) == 0) return true;
+
+    EnterCriticalSection(&tradeCs);
+    tradeMap.clear();
+    LeaveCriticalSection(&tradeCs);
+    nextTradeId = 2;  // Zorro treats BrokerBuy2 return 0 or 1 as failure
+    lastOrderId[0] = 0;
+    httpRequestId = 0;
+    lotSize = 1.0;
+    uuidTrades = false;
+    strncpy_s(sessionOwner, owner ? owner : "", _TRUNCATE);
+    // lastNonce is deliberately kept: it is time-based and must never go
+    // backwards, whichever account signs next.
+    return false;
 }
 
 void TradingState::cleanup() {

@@ -25,9 +25,9 @@ A clean clone builds in CI without any local Zorro install — see
 
 ## Branching model
 
-- `main` — production. Tagged releases are cut from here.
-- `develop` — integration branch. **Open pull requests against `develop`.**
-- `feature/*` — branch from `develop` for individual changes.
+- `main` — the only long-lived branch. **Open pull requests against `main`.**
+  Releases are tagged commits on `main`; untagged commits are not releases.
+- `feature/*`, `fix/*`, `docs/*` — branch from `main` for individual changes.
 
 ## Building and testing
 

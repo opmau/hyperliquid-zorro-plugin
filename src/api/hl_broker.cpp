@@ -322,7 +322,22 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
             }
         }
 
-        hl::trading::init();
+        // [OPM-1552] Zorro keeps its trade IDs across a logout/login, so a
+        // re-login on the same account keeps the trades it is tracking.
+        char sessionOwner[128];
+        sprintf_s(sessionOwner, "%s@%s", hl::g_config.walletAddress,
+                  hl::g_config.isTestnet ? "testnet" : "mainnet");
+        if (hl::trading::beginSession(sessionOwner)) {
+            size_t kept = 0;
+            EnterCriticalSection(&hl::g_trading.tradeCs);
+            kept = hl::g_trading.tradeMap.size();
+            LeaveCriticalSection(&hl::g_trading.tradeCs);
+            hl::g_logger.logf(1, "BrokerLogin: same account, %u tracked trades kept",
+                              (unsigned)kept);
+        } else if (hl::g_config.diagLevel >= 1) {
+            hl::g_logger.log(1, "BrokerLogin: trade tracking starts empty");
+        }
+        uuidResetSession();
 
         // Cache asset metadata — retry once on failure [OPM-105]
         int cached = hl::market::refreshMeta();
@@ -472,7 +487,8 @@ DLLFUNC int BrokerLogin(char* user, char* pwd, char* type, char* accounts) {
         hl::g_logger.flush();
 
         hl::market::cleanup();
-        hl::trading::cleanup();
+        hl::trading::endSession();
+        uuidResetSession();
 
         if (hl::g_wsManager) {
             auto* wsMgr = static_cast<hl::ws::WebSocketManager*>(hl::g_wsManager);

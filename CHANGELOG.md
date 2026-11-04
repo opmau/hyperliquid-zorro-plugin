@@ -13,6 +13,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`brokerCommand(50046, 1)` identifies trades by a string Zorro stores with
+  the trade.** An int trade ID only means something to the plugin process that
+  issued it, so closing a trade that a new Zorro process resumes from its `.trd`
+  file fails with "Trade not found". With UUID identifiers on, `BrokerBuy2`
+  returns `-1` and Zorro reads the identifier with `GET_UUID`; the plugin can
+  then close the trade even when it no longer tracks it, by looking up the
+  opening order on the exchange. With it on, `50044` and `50045` cannot address
+  the new trades. Off by default. See `docs/BROKERCOMMAND_REFERENCE.md`
+  [OPM-1552].
+- **At `SET_DIAGNOSTICS` 1 or higher, the log reports where price lookups were
+  answered from, at most once a minute.** The line reads
+  `price source: ws=N wait=N stale=N http=N failed=N none=N (fallback N%)`.
+  `ws` and `wait` count lookups answered from the price cache, which holds
+  live-feed quotes and the most recent HTTP quote. `stale`, `http`, `failed`
+  and `none` count lookups the cache could not answer with a current quote;
+  `failed` and `none` returned no price at all. `fallback` is the share of
+  those four in all lookups since the previous line. The first line appears
+  about a minute after the first price lookup, and none is written while no
+  prices are requested. Earlier versions reported stale quotes and HTTP
+  fallbacks only at `SET_DIAGNOSTICS` 2.
 - **Set leverage and isolated margin per asset (`50047`–`50049`).** Leverage on
   Hyperliquid is an account setting per asset, not an order field, so a
   strategy previously could not choose it: every entry opened at whatever the
@@ -28,6 +48,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whether isolated margin can be removed. Requests the exchange would reject
   are refused before signing, with the reason readable via `50023`. See
   `docs/BROKERCOMMAND_REFERENCE.md` [OPM-1584].
+
+### Changed
+
+- **The reason an order was rejected is logged at every `SET_DIAGNOSTICS`
+  level, including 0.** Earlier versions logged
+  `BrokerBuy2: Order failed - <reason>` and
+  `BrokerSell2: Close failed - <reason>` only at level 1 or higher, so at
+  level 0 Zorro's Warning 075 was the only trace. At level 0 these lines add one
+  log line for each order the exchange rejects, including each post-only (ALO)
+  order rejected because it would cross, and for each order that fails while
+  being built or sent. Other refusals, such as `BrokerSell2: Trade not found`
+  for a close of a trade the plugin does not track, are logged only at level 1
+  or higher.
+- **A market order that `BrokerBuy2` does not send for lack of a price is logged
+  at every `SET_DIAGNOSTICS` level, including 0.** With no price there is no
+  limit to send, so `BrokerBuy2` sends no order and returns 0. Earlier versions
+  logged `BrokerBuy2: No price available` only at level 1 or higher; the line
+  now reads `BrokerBuy2: No price for <coin> - order not sent`, so a script that
+  searches the log for the old text needs the new one. This covers market
+  orders that open a position and market closes, which Zorro sends through
+  `BrokerBuy2` on accounts with the NFA flag set. A close of a position the
+  plugin already sees as flat is reported as filled and is not logged at
+  level 0.
+
+### Fixed
+
+- **A logout and login on the same account keeps the trades the plugin
+  tracks.** Zorro keeps its trade IDs across a re-login, but the plugin started
+  empty, so every later close of an open trade failed with "Trade not found".
+  Tracked trades now survive a re-login when the wallet and network are
+  unchanged; a login to a different wallet or network starts empty and turns
+  `50046` off [OPM-1552].
+- **Fill polls that fall back to an exchange lookup by client order ID read a
+  filled order's size as 0.** The filled size is now the original size minus the
+  size still resting, which also reports partial fills on open and cancelled
+  orders, and the lookup no longer resets the trade's fill price to 0
+  [OPM-1552].
+- **A market close is not sent when no price is available.** Earlier versions
+  sent the reduce-only close with a limit price of 0 in place of the
+  slippage-bounded limit. `BrokerSell2` now sends no order, returns 0 and logs
+  `BrokerSell2: No price for <coin> - close not sent` at every
+  `SET_DIAGNOSTICS` level, including 0; Zorro repeats a failed close at
+  increasing intervals.
+
+### Security
+
+- **`brokerCommand(50003)` writes `0` in the `Pass` column of the
+  `Accounts.csv` template.** Templates written by versions 2.0.0 to 2.3.0
+  contain the signing key in plain text: delete them, and if one has been
+  shared or copied off the machine, treat the key as exposed and replace it.
+  With `0`, the key is entered manually at login; for an unattended login,
+  paste your own key into `Pass`.
 
 ## [2.3.0] — 2026-08-20
 

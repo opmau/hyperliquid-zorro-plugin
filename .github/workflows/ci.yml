@@ -1,6 +1,6 @@
 # CI
-# Continuous build + unit-test check on every push and pull request to the
-# main development branches. Proves the repo is self-contained (a clean clone
+# Continuous build + unit-test check on every push to `main` and every pull
+# request into it. Proves the repo is self-contained (a clean clone
 # builds with no local-only dependencies) and runs the fast unit tests.
 #
 # This complements release.yml (which builds + publishes the production DLL on
@@ -9,9 +9,9 @@ name: CI
 
 on:
   push:
-    branches: [develop, main]
+    branches: [main]
   pull_request:
-    branches: [develop, main]
+    branches: [main]
 
 # Avoid redundant runs when pushing to a branch that has an open PR.
 concurrency:

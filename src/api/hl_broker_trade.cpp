@@ -160,7 +160,11 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
             hl::PriceData price = hl::market::getPrice(coinForApi.c_str());
             double basePrice = (volume > 0) ? price.ask : price.bid;
 
-            if (basePrice <= 0) {
+            // Apply slippage buffer so IOC fills even if price moves slightly
+            double slippage = hl::config::MARKET_ORDER_SLIPPAGE;
+            request.limitPrice = hl::utils::marketOrderLimit(basePrice, volume > 0, slippage);
+
+            if (request.limitPrice <= 0) {
                 // [OPM-227] Close with no price: check if position is already flat
                 if (isCloseOrder) {
                     hl::account::PositionInfo pos = hl::account::getPosition(coinForApi.c_str());
@@ -174,15 +178,11 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
                         return earlyTradeId;
                     }
                 }
-                hl::g_logger.log(1, "BrokerBuy2: No price available");
+                // Level 0: Zorro's Warning 075 does not give the cause.
+                hl::g_logger.logf(0, "BrokerBuy2: No price for %s - order not sent",
+                                  coinForApi.c_str());
                 return 0;
             }
-
-            // Apply slippage buffer so IOC fills even if price moves slightly
-            double slippage = hl::config::MARKET_ORDER_SLIPPAGE;
-            request.limitPrice = (volume > 0)
-                ? basePrice * (1.0 + slippage)   // Buy: above ask
-                : basePrice * (1.0 - slippage);  // Sell: below bid
             request.orderType = hl::OrderType::Ioc;
 
             hl::g_logger.logf(1, "BrokerBuy2: Market order - IOC @ %.2f (base %.2f, slippage %.0f%%)",
@@ -259,9 +259,8 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
                 return tradeId;
             }
         }
-        if (hl::g_config.diagLevel >= 1) {
-            hl::g_logger.logf(1, "BrokerBuy2: Order failed - %s", result.error.c_str());
-        }
+        // Level 0: Zorro's Warning 075 does not give the cause.
+        hl::g_logger.logf(0, "BrokerBuy2: Order failed - %s", result.error.c_str());
         return 0;
     }
 
@@ -284,6 +283,16 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
         hl::g_logger.log(1, msg);
     }
 
+    // [OPM-1552] UUID mode: Zorro reads the identifier with GET_UUID and hands
+    // it back for every later call on this trade. Close and trigger orders are
+    // not trades of their own, so they keep their int ID.
+    if (hl::g_trading.uuidTrades && !isCloseOrder && !isTriggerOrder) {
+        hl::OrderState placed;
+        const char* cloid = result.cloid.c_str();
+        if (!*cloid && hl::trading::getOrder(tradeId, placed)) cloid = placed.cloid;
+        if (uuidRecordOpened(coinForApi.c_str(), request.side, cloid)) return -1;
+    }
+
     return tradeId;
 }
 
@@ -298,6 +307,14 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
     if (pClose) *pClose = 0;
     if (pCost) *pCost = 0;
     if (pProfit) *pProfit = 0;
+
+    // [OPM-1552] UUID trade: Zorro sent the identifier with SET_UUID first.
+    // Success returns the ID Zorro passed (-1), failure 0.
+    if (tradeId == -1) {
+        int id = uuidTradeForClose();
+        if (!id) return 0;
+        return BrokerSell2(id, amount, limit, pClose, pCost, pProfit, pFill) ? -1 : 0;
+    }
 
     if (hl::g_config.diagLevel >= 1) {
         char msg[128];
@@ -357,21 +374,24 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
         request.orderType = hl::OrderType::Ioc;
     }
 
-    // If no limit price, this is a market close: use IOC + slippage buffer
+    // If no limit price, this is a market close: use IOC + slippage buffer.
+    // Without a price there is no limit to send, so report the close as failed;
+    // Zorro repeats a failed close at increasing intervals.
     if (request.limitPrice <= 0) {
         hl::PriceData price = hl::market::getPrice(state.coin);
         double basePrice = closingBuy ? price.ask : price.bid;
+        double slippage = hl::config::MARKET_ORDER_SLIPPAGE;
+        request.limitPrice = hl::utils::marketOrderLimit(basePrice, closingBuy, slippage);
 
-        if (basePrice > 0) {
-            double slippage = hl::config::MARKET_ORDER_SLIPPAGE;
-            request.limitPrice = closingBuy
-                ? basePrice * (1.0 + slippage)   // Closing buy: above ask
-                : basePrice * (1.0 - slippage);  // Closing sell: below bid
-            request.orderType = hl::OrderType::Ioc;
-
-            hl::g_logger.logf(1, "BrokerSell2: Market close - IOC @ %.2f (base %.2f, slippage %.0f%%)",
-                              request.limitPrice, basePrice, slippage * 100);
+        if (request.limitPrice <= 0) {
+            // Level 0: Zorro's Warning 075 ("Can't close") does not give the cause.
+            hl::g_logger.logf(0, "BrokerSell2: No price for %s - close not sent", state.coin);
+            return 0;
         }
+        request.orderType = hl::OrderType::Ioc;
+
+        hl::g_logger.logf(1, "BrokerSell2: Market close - IOC @ %.2f (base %.2f, slippage %.0f%%)",
+                          request.limitPrice, basePrice, slippage * 100);
     }
 
     // [OPM-792] Place under an explicit internal tradeId so the resting close
@@ -401,7 +421,8 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
             recordZorroClose(tradeId, state, closeSize);
             return tradeId;
         }
-        hl::g_logger.logf(1, "BrokerSell2: Close failed - %s", result.error.c_str());
+        // Level 0: Zorro's Warning 075 does not give the cause.
+        hl::g_logger.logf(0, "BrokerSell2: Close failed - %s", result.error.c_str());
         return 0;
     }
 
