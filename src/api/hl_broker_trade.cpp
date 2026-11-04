@@ -257,9 +257,8 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
                 return tradeId;
             }
         }
-        if (hl::g_config.diagLevel >= 1) {
-            hl::g_logger.logf(1, "BrokerBuy2: Order failed - %s", result.error.c_str());
-        }
+        // Level 0: Zorro's Warning 075 does not give the cause.
+        hl::g_logger.logf(0, "BrokerBuy2: Order failed - %s", result.error.c_str());
         return 0;
     }
 
@@ -420,7 +419,8 @@ DLLFUNC int BrokerSell2(int tradeId, int amount, double limit,
             recordZorroClose(tradeId, state, closeSize);
             return tradeId;
         }
-        hl::g_logger.logf(1, "BrokerSell2: Close failed - %s", result.error.c_str());
+        // Level 0: Zorro's Warning 075 does not give the cause.
+        hl::g_logger.logf(0, "BrokerSell2: Close failed - %s", result.error.c_str());
         return 0;
     }
 

@@ -34,6 +34,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prices are requested. Earlier versions reported stale quotes and HTTP
   fallbacks only at `SET_DIAGNOSTICS` 2.
 
+### Changed
+
+- **The reason an order was rejected is logged at every `SET_DIAGNOSTICS`
+  level, including 0.** Earlier versions logged
+  `BrokerBuy2: Order failed - <reason>` and
+  `BrokerSell2: Close failed - <reason>` only at level 1 or higher, so at
+  level 0 Zorro's Warning 075 was the only trace. At level 0 these lines add one
+  log line for each order the exchange rejects, including each post-only (ALO)
+  order rejected because it would cross, and for each order that fails while
+  being built or sent. Other refusals, such as `BrokerBuy2: No price available`
+  and `BrokerSell2: Trade not found`, are logged only at level 1 or higher.
+
 ### Fixed
 
 - **A logout and login on the same account keeps the trades the plugin
