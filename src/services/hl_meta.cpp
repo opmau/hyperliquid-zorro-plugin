@@ -160,7 +160,7 @@ int fetchMeta() {
         info.minSize = pow(10.0, -szDecimals);
         info.tickSize = pow(10.0, -pxDecimals);
         info.maxLeverage = maxLeverage;
-        info.onlyIsolated = json::getBool(item, "onlyIsolated");  // [OPM-1584]
+        info.onlyIsolated = json::getBool(item, "onlyIsolated");
         json::getString(item, "marginMode", info.marginMode, sizeof(info.marginMode));
         info.isPerpDex = false;
         info.perpDex[0] = 0;
@@ -358,7 +358,7 @@ int fetchPerpDexMeta(const char* perpDex) {
         info.minSize = pow(10.0, -szDecimals);
         info.tickSize = pow(10.0, -pxDecimals);
         info.maxLeverage = maxLeverage;
-        info.onlyIsolated = json::getBool(item, "onlyIsolated");  // [OPM-1584]
+        info.onlyIsolated = json::getBool(item, "onlyIsolated");
         json::getString(item, "marginMode", info.marginMode, sizeof(info.marginMode));
         info.isPerpDex = true;
         strncpy_s(info.perpDex, perpDex, _TRUNCATE);

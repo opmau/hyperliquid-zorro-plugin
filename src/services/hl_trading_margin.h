@@ -1,5 +1,5 @@
 //=============================================================================
-// hl_trading_margin.h - Per-asset leverage and isolated margin [OPM-1584]
+// hl_trading_margin.h - Per-asset leverage and isolated margin
 //=============================================================================
 // Part of Hyperliquid Plugin for Zorro
 //

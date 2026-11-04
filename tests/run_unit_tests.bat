@@ -482,7 +482,7 @@ if !ERRORLEVEL! EQU 0 (
 echo.
 
 REM =============================================================================
-REM Test 30: Leverage and isolated margin actions [OPM-1584]
+REM Test 30: Leverage and isolated margin actions
 REM Prevents: updateLeverage / updateIsolatedMargin packed in a field order the
 REM           exchange does not sign, a margin removal packed unsigned, or an
 REM           isolated-only asset accepted for cross margin.

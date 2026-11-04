@@ -47,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `brokerCommand(50049)` reports whether the asset allows cross margin and
   whether isolated margin can be removed. Requests the exchange would reject
   are refused before signing, with the reason readable via `50023`. See
-  `docs/BROKERCOMMAND_REFERENCE.md` [OPM-1584].
+  `docs/BROKERCOMMAND_REFERENCE.md`.
 
 ### Changed
 

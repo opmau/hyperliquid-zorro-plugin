@@ -18,7 +18,7 @@
 //   50040-50041  TWAP place / cancel
 //   50042-50044  Modify (struct), bracket, modify-by-tradeID  [OPM-793]
 //   50045        Exchange order ID for a trade ID         [OPM-1085]
-//   50047-50049  Leverage, isolated margin, margin mode   [OPM-1584]
+//   50047-50049  Leverage, isolated margin, margin mode
 //=============================================================================
 
 #include "hl_broker_internal.h"
@@ -496,7 +496,7 @@ double handleHyperliquidCommand(int mode, intptr_t parameter) {
     }
 
     //=========================================================================
-    // LEVERAGE AND ISOLATED MARGIN (50047-50049) [OPM-1584]
+    // LEVERAGE AND ISOLATED MARGIN (50047-50049)
     //=========================================================================
     // All three act on the asset selected by SET_SYMBOL. Rejections, local or
     // from the exchange, are readable via HL_GET_LAST_ORDER_ERROR (50023).

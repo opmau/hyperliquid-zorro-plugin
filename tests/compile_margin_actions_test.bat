@@ -3,7 +3,7 @@ REM ============================================================================
 REM compile_margin_actions_test.bat - Compile and run leverage/margin tests
 REM =============================================================================
 REM PREVENTS: updateLeverage / updateIsolatedMargin packed or signed unlike the
-REM           SDK; USD->ntli scaling; isolated-only assets read as cross [OPM-1584]
+REM           SDK; USD->ntli scaling; isolated-only assets read as cross
 REM VERIFIED AGAINST: msgpack-python packb + Python SDK sign_l1_action
 REM =============================================================================
 
@@ -13,7 +13,7 @@ cd /d "%~dp0"
 
 echo.
 echo ===================================================
-echo  Compiling test_margin_actions.cpp [OPM-1584]
+echo  Compiling test_margin_actions.cpp
 echo  Tests: leverage / isolated margin msgpack + signing
 echo ===================================================
 echo.

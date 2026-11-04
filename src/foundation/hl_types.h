@@ -49,7 +49,7 @@ struct AssetInfo {
     double minSize = 0.0;
     double tickSize = 0.0;
     int maxLeverage = 1;
-    // Meta margin flags [OPM-1584]: "normal" | "noCross" (isolated only) |
+    // Meta margin flags: "normal" | "noCross" (isolated only) |
     // "strictIsolated" (no margin removal) | "" (omitted); onlyIsolated is legacy
     bool onlyIsolated = false;
     char marginMode[16] = {0};

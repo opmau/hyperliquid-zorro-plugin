@@ -1,7 +1,7 @@
 //=============================================================================
 // test_margin_actions.cpp - updateLeverage / updateIsolatedMargin signing
 //=============================================================================
-// PREVENTS BUGS: [OPM-1584]
+// PREVENTS BUGS:
 //   - Field order differing from the Python SDK, so the exchange recovers a
 //     different signer and rejects the action
 //   - A negative ntli (margin removal) packed as an unsigned integer
@@ -178,7 +178,7 @@ TEST_CASE(margin_mode_field_holds_longest_value) {
 }
 
 int main() {
-    printf("=== Leverage / isolated margin Tests [OPM-1584] ===\n\n");
+    printf("=== Leverage / isolated margin Tests ===\n\n");
 
     if (!hl::crypto::init()) {
         printf("FATAL: crypto::init() failed\n");

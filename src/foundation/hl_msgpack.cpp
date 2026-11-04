@@ -484,7 +484,7 @@ ByteArray packScheduleCancelAction(uint64_t time) {
     return packer.data();
 }
 
-// --- Leverage and isolated margin [OPM-1584] ---
+// --- Leverage and isolated margin ---
 // Field order matches the Python SDK's update_leverage / update_isolated_margin.
 
 ByteArray packUpdateLeverageAction(int asset, bool isCross, int leverage) {

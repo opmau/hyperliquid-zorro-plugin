@@ -1,5 +1,5 @@
 //=============================================================================
-// hl_trading_margin.cpp - Per-asset leverage and isolated margin [OPM-1584]
+// hl_trading_margin.cpp - Per-asset leverage and isolated margin
 //=============================================================================
 // LAYER: Services | DEPENDENCIES: hl_meta.h, hl_crypto.h, hl_http.h
 //
