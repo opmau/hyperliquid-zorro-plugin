@@ -43,8 +43,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   level 0 Zorro's Warning 075 was the only trace. At level 0 these lines add one
   log line for each order the exchange rejects, including each post-only (ALO)
   order rejected because it would cross, and for each order that fails while
-  being built or sent. Other refusals, such as `BrokerBuy2: No price available`
-  and `BrokerSell2: Trade not found`, are logged only at level 1 or higher.
+  being built or sent. Other refusals, such as `BrokerSell2: Trade not found`
+  for a close of a trade the plugin does not track, are logged only at level 1
+  or higher.
+- **A market order that `BrokerBuy2` does not send for lack of a price is logged
+  at every `SET_DIAGNOSTICS` level, including 0.** With no price there is no
+  limit to send, so `BrokerBuy2` sends no order and returns 0. Earlier versions
+  logged `BrokerBuy2: No price available` only at level 1 or higher; the line
+  now reads `BrokerBuy2: No price for <coin> - order not sent`, so a script that
+  searches the log for the old text needs the new one. This covers market
+  orders that open a position and market closes, which Zorro sends through
+  `BrokerBuy2` on accounts with the NFA flag set. A close of a position the
+  plugin already sees as flat is reported as filled and is not logged at
+  level 0.
 
 ### Fixed
 

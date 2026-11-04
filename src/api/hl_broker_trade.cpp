@@ -178,7 +178,9 @@ DLLFUNC int BrokerBuy2(char* symbol, int volume, double stopDist,
                         return earlyTradeId;
                     }
                 }
-                hl::g_logger.log(1, "BrokerBuy2: No price available");
+                // Level 0: Zorro's Warning 075 does not give the cause.
+                hl::g_logger.logf(0, "BrokerBuy2: No price for %s - order not sent",
+                                  coinForApi.c_str());
                 return 0;
             }
             request.orderType = hl::OrderType::Ioc;
