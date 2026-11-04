@@ -505,7 +505,10 @@ double handleHyperliquidCommand(int mode, intptr_t parameter) {
         //   var p[2]; p[0] = 3; p[1] = 0;   // 3x isolated (p[1] = 1: cross)
         //   brokerCommand(SET_SYMBOL, "TSLA-USDC_xyz");
         //   if(!brokerCommand(50047, p)) ...
-        if (parameter == 0) return 0;
+        if (parameter == 0) {
+            hl::trading::setLastOrderError("50047 needs a var[2] parameter");
+            return 0;
+        }
         const double* p = (const double*)parameter;
         return hl::trading::updateLeverage(hl::g_trading.currentSymbol,
                                            (int)p[0], p[1] != 0) ? 1 : 0;
@@ -514,7 +517,10 @@ double handleHyperliquidCommand(int mode, intptr_t parameter) {
     case HL_ADJUST_ISOLATED_MARGIN: {
         //   var p[1]; p[0] = 250;           // add $250 (negative removes)
         //   if(!brokerCommand(50048, p)) ...
-        if (parameter == 0) return 0;
+        if (parameter == 0) {
+            hl::trading::setLastOrderError("50048 needs a var[1] parameter");
+            return 0;
+        }
         const double* p = (const double*)parameter;
         return hl::trading::adjustIsolatedMargin(hl::g_trading.currentSymbol,
                                                  p[0]) ? 1 : 0;
